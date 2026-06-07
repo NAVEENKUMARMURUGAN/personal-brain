@@ -49,8 +49,10 @@ export default function UploadModal({ onClose, onSuccess }: UploadModalProps) {
 
     try {
       setProgress('Chunking and embedding…')
+      const token = localStorage.getItem('pb-token')
       const res = await fetch(`${API_URL}/upload`, {
         method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       })
       const data = await res.json()

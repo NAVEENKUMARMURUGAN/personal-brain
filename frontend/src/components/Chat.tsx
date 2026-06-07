@@ -206,8 +206,10 @@ export default function Chat({ onDrillCategory, onAgentAction }: ChatProps) {
         formData.append('audio', blob, 'voice.webm')
 
         try {
+          const token = localStorage.getItem('pb-token')
           const res = await fetch(`${API_URL}/transcribe`, {
             method: 'POST',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
             body: formData,
           })
           const data = await res.json()

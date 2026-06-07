@@ -4,14 +4,16 @@ import logging
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi import FastAPI, Request, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from typing import Optional
 
 import brain
 import tasks as tasks_module
 import history
 import graphql_handler
+import auth
 from context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
@@ -91,7 +93,6 @@ EXTRACTORS = {
 
 @app.on_event("startup")
 async def startup():
-    # Retry Qdrant connection — on Railway, Qdrant may take a moment to be ready
     import time
     for attempt in range(10):
         try:
@@ -101,19 +102,65 @@ async def startup():
             break
         except Exception as e:
             if attempt < 9:
-                logger.warning("Qdrant not ready (attempt %d/10): %s — retrying in 3s", attempt + 1, e)
+                logger.warning("Qdrant not ready (%d/10): %s — retrying in 3s", attempt + 1, e)
                 time.sleep(3)
             else:
                 logger.error("Qdrant unreachable after 10 attempts: %s", e)
     history.ensure_db()
+    auth.ensure_users_table()
 
 
 # ── Routes ─────────────────────────────────────────────────────
+
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
 
+
+# ── Auth routes ────────────────────────────────────────────────
+
+@app.get("/auth/google")
+async def google_login():
+    """Redirect browser to Google OAuth consent screen."""
+    redirect_uri = f"{BACKEND_URL}/auth/google/callback"
+    url = auth.google_auth_url(redirect_uri)
+    return RedirectResponse(url)
+
+
+@app.get("/auth/google/callback")
+async def google_callback(code: str, state: Optional[str] = None, error: Optional[str] = None):
+    """Handle Google OAuth callback, issue JWT, redirect to frontend."""
+    if error:
+        return RedirectResponse(f"{FRONTEND_URL}/login?error={error}")
+    try:
+        redirect_uri = f"{BACKEND_URL}/auth/google/callback"
+        info  = auth.exchange_code(code, redirect_uri)
+        user  = auth.upsert_user(info["google_id"], info["email"], info["name"], info["avatar_url"])
+        token = auth.issue_jwt(user)
+        return RedirectResponse(f"{FRONTEND_URL}?token={token}")
+    except Exception as e:
+        logger.error("OAuth callback error: %s", e, exc_info=True)
+        return RedirectResponse(f"{FRONTEND_URL}/login?error=auth_failed")
+
+
+@app.get("/auth/me")
+async def get_me(authorization: Optional[str] = Header(None)):
+    """Return the current user from JWT."""
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user = auth.get_user_by_id(user_id)
+    if not user:
+        return JSONResponse({"error": "User not found"}, status_code=404)
+    return JSONResponse({"id": user["id"], "email": user["email"],
+                         "name": user["name"], "avatar_url": user["avatar_url"]})
+
+
+# ── GraphQL ────────────────────────────────────────────────────
 
 @app.post("/graphql")
 async def graphql_post(request: Request):
@@ -126,14 +173,20 @@ async def graphql_schema():
 
 
 @app.get("/context-debug")
-async def context_debug(message: str = "test"):
-    ctx = await ContextManager.build(current_message=message)
+async def context_debug(message: str = "test", authorization: Optional[str] = Header(None)):
+    user_id = auth.extract_user_id(authorization) or "debug"
+    ctx = await ContextManager.build(current_message=message, user_id=user_id)
     return PlainTextResponse(ctx.debug(), media_type="text/plain")
 
 
 @app.post("/transcribe")
-async def transcribe(audio: UploadFile = File(...)):
-    """Transcribe audio using faster-whisper (tiny model, CPU)."""
+async def transcribe(
+    audio: UploadFile = File(...),
+    authorization: Optional[str] = Header(None),
+):
+    """Transcribe audio using faster-whisper. Requires auth."""
+    if not auth.extract_user_id(authorization):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     try:
         suffix = os.path.splitext(audio.filename or "audio.webm")[1] or ".webm"
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
@@ -155,23 +208,23 @@ async def transcribe(audio: UploadFile = File(...)):
 
 
 @app.delete("/memory/{point_id}")
-async def delete_memory(point_id: str):
-    """
-    Delete a single memory point from Qdrant by its UUID.
-    Used by the Knowledge Explorer delete button.
-    """
-    ok = brain.delete_memory(point_id)
+async def delete_memory(point_id: str, authorization: Optional[str] = Header(None)):
+    """Delete a single memory point scoped to the authenticated user."""
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    ok = brain.delete_memory(point_id, user_id)
     if ok:
         return JSONResponse({"deleted": point_id})
     return JSONResponse({"error": f"Failed to delete {point_id}"}, status_code=500)
 
 
 @app.delete("/memory/source/{source_id}")
-async def delete_memory_source(source_id: str):
-    """
-    Delete all chunks that share a source_id (e.g. all chunks of an uploaded PDF).
-    """
-    brain.delete_memories_by_source(source_id)
+async def delete_memory_source(source_id: str, authorization: Optional[str] = Header(None)):
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    brain.delete_memories_by_source(source_id, user_id)
     return JSONResponse({"deleted_source": source_id})
 
 
@@ -179,13 +232,13 @@ async def delete_memory_source(source_id: str):
 async def upload_file(
     file: UploadFile = File(...),
     category: str = Form("General"),
+    authorization: Optional[str] = Header(None),
 ):
-    """
-    Accept a file (PDF, DOCX, XLSX, TXT, MD, CSV), extract its text,
-    and run it through the chunk_and_save pipeline.
+    """Accept a file, extract text, chunk and save scoped to the authenticated user."""
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
-    Returns: { saved: int, skipped: int, category: str, filename: str }
-    """
     filename = file.filename or "upload"
     ext = os.path.splitext(filename)[1].lower()
 
@@ -206,15 +259,15 @@ async def upload_file(
         if not text.strip():
             return JSONResponse({"error": "No text could be extracted from the file."}, status_code=400)
 
-        logger.info("Extracted %d chars from %s → category=%s", len(text), filename, category)
+        logger.info("Extracted %d chars from %s → category=%s user=%s", len(text), filename, category, user_id[:8])
 
-        result = brain.chunk_and_save(text, category)
+        result = brain.chunk_and_save(text, category, user_id)
 
         return JSONResponse({
-            "filename": filename,
-            "category": category,
-            "saved": result["saved_count"],
-            "skipped": result["skipped_count"],
+            "filename":    filename,
+            "category":    category,
+            "saved":       result["saved_count"],
+            "skipped":     result["skipped_count"],
             "total_chars": len(text),
         })
 

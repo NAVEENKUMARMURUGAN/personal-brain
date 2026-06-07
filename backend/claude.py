@@ -209,27 +209,24 @@ CRITICAL rules:
 # Tool execution
 # ─────────────────────────────────────────────────────────────
 
-def _execute_tool(name: str, inputs: dict, today: str) -> tuple[str, dict]:
-    """
-    Execute a tool by name. Returns (text_result, metadata).
-    metadata carries structured data for building the response payload.
-    """
+def _execute_tool(name: str, inputs: dict, today: str, user_id: str) -> tuple[str, dict]:
+    """Execute a tool scoped to user_id. Returns (text_result, metadata)."""
     try:
         if name == "search_knowledge":
-            query = inputs["query"]
-            limit = inputs.get("limit", 8)
-            memories = brain.search_memories(query, limit=limit)
+            query  = inputs["query"]
+            limit  = inputs.get("limit", 8)
+            memories = brain.search_memories(query, user_id, limit=limit)
             if not memories:
                 return "No relevant saved notes found.", {"type": "search", "memories": []}
             lines = [f"[{m['category']}] {m['content']} (score: {m['score']:.2f})" for m in memories]
             return "\n".join(lines), {"type": "search", "memories": memories}
 
         elif name == "save_knowledge":
-            content = inputs["content"]
+            content  = inputs["content"]
             category = inputs["category"]
             if len(content) > brain.CHUNK_THRESHOLD_CHARS:
-                result = brain.chunk_and_save(content, category)
-                saved = result["saved_count"]
+                result  = brain.chunk_and_save(content, category, user_id)
+                saved   = result["saved_count"]
                 skipped = result["skipped_count"]
                 if saved == 0:
                     return f"Already have all of this saved under '{category}'.", {"type": "save", "skipped": True}
@@ -238,46 +235,42 @@ def _execute_tool(name: str, inputs: dict, today: str) -> tuple[str, dict]:
                     msg += f" ({skipped} duplicate{'s' if skipped != 1 else ''} skipped)"
                 return msg + ".", {"type": "save", "category": category, "memories": result["memories"], "chunked": True}
             else:
-                if brain.is_duplicate(content):
+                if brain.is_duplicate(content, user_id):
                     return f"Already have this saved under '{category}'.", {"type": "save", "skipped": True}
-                memory = brain.save_memory(content, category)
+                memory = brain.save_memory(content, category, user_id)
                 return f"Saved under '{category}'.", {"type": "save", "category": category, "memories": [memory], "chunked": False}
 
         elif name == "get_tasks":
-            date = inputs["date"]
-            task_page = tasks_module.get_tasks(date)
-            pending = task_page.get("pending", [])
+            date      = inputs["date"]
+            task_page = tasks_module.get_tasks(date, user_id)
+            pending   = task_page.get("pending", [])
             completed = task_page.get("completed", [])
             if not pending and not completed:
                 return f"No tasks found for {date}.", {"type": "tasks", "task_page": task_page}
-            lines = []
-            for t in pending:
-                lines.append(f"[PENDING] [{t['id'][:8]}] {t['content']}")
-            for t in completed:
-                lines.append(f"[DONE]    [{t['id'][:8]}] {t['content']}")
+            lines  = [f"[PENDING] [{t['id'][:8]}] {t['content']}" for t in pending]
+            lines += [f"[DONE]    [{t['id'][:8]}] {t['content']}" for t in completed]
             return "\n".join(lines), {"type": "tasks", "task_page": task_page}
 
         elif name == "add_tasks":
             task_list = inputs.get("tasks", [])
             if not task_list:
                 return "No tasks provided.", {"type": "tasks_added", "tasks": []}
-            saved = tasks_module.save_tasks(task_list, today)
+            saved = tasks_module.save_tasks(task_list, today, user_id)
             lines = "\n".join(f"- {t}" for t in task_list)
             return f"Added {len(task_list)} task{'s' if len(task_list) != 1 else ''}:\n{lines}", {
-                "type": "tasks_added",
-                "tasks": saved,
+                "type": "tasks_added", "tasks": saved,
                 "task_page": {"pending": saved, "completed": [], "date": today},
             }
 
         elif name == "complete_task":
-            task_id = inputs["task_id"]
-            task = tasks_module.complete_task(task_id)
-            task_page = tasks_module.get_tasks(today)
+            task_id   = inputs["task_id"]
+            task      = tasks_module.complete_task(task_id, user_id)
+            task_page = tasks_module.get_tasks(today, user_id)
             return f"Marked complete: {task['content']}", {"type": "task_completed", "task": task, "task_page": task_page}
 
         elif name == "carry_forward_tasks":
             tomorrow = (dt_module.date.fromisoformat(today) + dt_module.timedelta(days=1)).isoformat()
-            carried = tasks_module.carry_forward(today, tomorrow)
+            carried  = tasks_module.carry_forward(today, tomorrow, user_id)
             n = len(carried)
             if n == 0:
                 return "No pending tasks to carry forward.", {"type": "carried", "tasks": []}
@@ -287,7 +280,7 @@ def _execute_tool(name: str, inputs: dict, today: str) -> tuple[str, dict]:
             }
 
         elif name == "get_categories":
-            cats = brain.get_categories()
+            cats = brain.get_categories(user_id)
             if not cats:
                 return "No knowledge categories yet.", {"type": "categories", "categories": []}
             lines = [f"- {c['icon']} {c['name']} ({c['count']} items)" for c in cats]
@@ -403,7 +396,7 @@ def _build_response(answer: str, tool_calls: list[dict]) -> dict:
 # Agent entry point
 # ─────────────────────────────────────────────────────────────
 
-async def process_message(ctx: ContextManager) -> dict:
+async def process_message(ctx: ContextManager, user_id: str) -> dict:
     today = datetime.now(timezone.utc).date().isoformat()
 
     system = SYSTEM_PROMPT.format(
@@ -413,37 +406,29 @@ async def process_message(ctx: ContextManager) -> dict:
         relevant_memories="\n".join(f"- [{m['category']}] {m['content']}" for m in ctx.relevant_memories) or "(none)",
     )
 
-    # Build initial messages — full history for conversational context
-    messages = ctx.to_messages()
-
+    messages       = ctx.to_messages()
     tool_calls_log: list[dict] = []
 
     try:
         for _round in range(MAX_TOOL_ROUNDS):
             response = _client.messages.create(
-                model=MODEL,
-                max_tokens=4096,
-                system=system,
-                tools=TOOLS,
-                messages=messages,
+                model=MODEL, max_tokens=4096,
+                system=system, tools=TOOLS, messages=messages,
             )
 
             logger.debug("Agent round %d: stop_reason=%s blocks=%d",
                          _round + 1, response.stop_reason, len(response.content))
 
-            # Collect any tool use blocks in this response
             tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
 
             if not tool_use_blocks or response.stop_reason == "end_turn":
-                # Claude is done — extract the final text
                 text_blocks = [b for b in response.content if b.type == "text"]
                 answer = text_blocks[0].text.strip() if text_blocks else "Done."
                 return _build_response(answer, tool_calls_log)
 
-            # Claude wants to call tools — execute each one
             tool_results = []
             for block in tool_use_blocks:
-                result_text, meta = _execute_tool(block.name, block.input, today)
+                result_text, meta = _execute_tool(block.name, block.input, today, user_id)
                 tool_calls_log.append({"name": block.name, "input": block.input, "meta": meta})
                 logger.info("Tool %s(%s) → %s", block.name, list(block.input.keys()), result_text[:80])
                 tool_results.append({

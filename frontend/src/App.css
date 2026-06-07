@@ -275,6 +275,15 @@ html, body, #root {
   margin-top: 1px;
 }
 
+.sidebar__avatar-img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--border-base);
+  flex-shrink: 0;
+}
+
 /* ── Theme toggle at bottom ── */
 .sidebar__theme-toggle {
   display: flex;

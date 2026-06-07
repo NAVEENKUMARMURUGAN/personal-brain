@@ -3,6 +3,8 @@ import Chat from './components/Chat'
 import RightPanel from './components/RightPanel'
 import TasksPage from './components/TasksPage'
 import KnowledgePage from './components/KnowledgePage'
+import LoginPage from './components/LoginPage'
+import { AuthProvider, useAuth } from './AuthContext'
 import './App.css'
 
 type Theme = 'dark' | 'light'
@@ -29,7 +31,33 @@ const NAV_ITEMS: { id: NavPage; icon: string; label: string }[] = [
   { id: 'settings',  icon: '⚙', label: 'Settings'   },
 ]
 
+function AppShell() {
+  const { user, loading, logout } = useAuth()
+
+  if (loading) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-page)', color: 'var(--text-faint)', fontFamily: 'var(--mono-font)', fontSize: '13px' }}>
+        Loading…
+      </div>
+    )
+  }
+
+  if (!user) {
+    return <LoginPage />
+  }
+
+  return <AppMain onLogout={logout} user={user} />
+}
+
 export default function App() {
+  return (
+    <AuthProvider>
+      <AppShell />
+    </AuthProvider>
+  )
+}
+
+function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: string; email: string; avatar_url: string } }) {
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [page, setPage] = useState<NavPage>('chat')
   const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([
@@ -102,11 +130,17 @@ export default function App() {
           </div>
         </div>
 
-        <div className="sidebar__user">
-          <div className="sidebar__avatar">U</div>
-          <div>
-            <div className="sidebar__user-name">Dev_Active</div>
-            <div className="sidebar__user-status">● Local Node</div>
+        <div className="sidebar__user" style={{ cursor: 'pointer' }} onClick={onLogout} title="Click to sign out">
+          {user.avatar_url ? (
+            <img src={user.avatar_url} alt={user.name} className="sidebar__avatar-img" />
+          ) : (
+            <div className="sidebar__avatar">{(user.name || user.email).charAt(0).toUpperCase()}</div>
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="sidebar__user-name" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user.name || user.email}
+            </div>
+            <div className="sidebar__user-status">● Sign out</div>
           </div>
         </div>
       </aside>

@@ -191,7 +191,11 @@ export default function KnowledgePage() {
   const handleDelete = useCallback(async (id: string) => {
     setDeletingId(id)
     try {
-      const res = await fetch(`${API_URL}/memory/${id}`, { method: 'DELETE' })
+      const token = localStorage.getItem('pb-token')
+      const res = await fetch(`${API_URL}/memory/${id}`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       if (res.ok) {
         setDeletedIds((prev) => new Set([...prev, id]))
         setUploadSuccess('Memory removed from knowledge base.')

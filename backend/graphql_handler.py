@@ -11,6 +11,7 @@ import brain
 import tasks as tasks_module
 import history
 import claude
+import auth
 from context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
@@ -148,30 +149,36 @@ async def handle(request: Request) -> JSONResponse:
     except Exception:
         return JSONResponse(_err("Invalid JSON body"), status_code=400)
 
+    # Extract user_id from Authorization header
+    authorization = request.headers.get("Authorization")
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse(_err("Unauthorized — please log in"), status_code=401)
+
     op_type, query, variables = _parse_operation(body)
     field = _extract_field_name(query)
 
-    logger.info("GraphQL op=%s field=%s variables=%s", op_type, field, list(variables.keys()))
+    logger.info("GraphQL op=%s field=%s user=%s", op_type, field, user_id[:8])
 
     try:
         if op_type == "mutation" and field == "send":
-            result = await _handle_send(variables)
+            result = await _handle_send(variables, user_id)
         elif op_type == "mutation" and field == "completeTask":
-            result = await _handle_complete_task(variables)
+            result = await _handle_complete_task(variables, user_id)
         elif op_type == "mutation" and field == "addTask":
-            result = await _handle_add_task(variables)
+            result = await _handle_add_task(variables, user_id)
         elif op_type == "mutation" and field == "editTask":
-            result = await _handle_edit_task(variables)
+            result = await _handle_edit_task(variables, user_id)
         elif op_type == "mutation" and field == "deleteTask":
-            result = await _handle_delete_task(variables)
+            result = await _handle_delete_task(variables, user_id)
         elif op_type == "query" and field == "messages":
-            result = await _handle_messages(variables)
+            result = await _handle_messages(variables, user_id)
         elif op_type == "query" and field == "tasks":
-            result = await _handle_tasks(variables)
+            result = await _handle_tasks(variables, user_id)
         elif op_type == "query" and field == "categories":
-            result = await _handle_categories()
+            result = await _handle_categories(user_id)
         elif op_type == "query" and field == "memories":
-            result = await _handle_memories(variables)
+            result = await _handle_memories(variables, user_id)
         else:
             logger.error("Unknown operation: op=%s field=%s query=%r", op_type, field, query)
             return JSONResponse(_err(f"Unknown operation: {field}"), status_code=400)
@@ -183,149 +190,119 @@ async def handle(request: Request) -> JSONResponse:
         return JSONResponse(_err(str(e)), status_code=500)
 
 
-async def _handle_send(variables: dict) -> dict:
+async def _handle_send(variables: dict, user_id: str) -> dict:
     content = variables.get("content", "").strip()
     if not content:
         return _err("content is required")
 
-    # clearedAt is an ISO timestamp set by the frontend when the user clicks
-    # "Clear" — ensures no history before that point is used as context.
     cleared_at = variables.get("clearedAt") or None
+    today      = datetime.now(timezone.utc).date().isoformat()
 
-    today = datetime.now(timezone.utc).date().isoformat()
+    history.save_message(str(uuid.uuid4()), content, "user", "text", None, user_id=user_id)
 
-    # Save user message
-    user_msg_id = str(uuid.uuid4())
-    history.save_message(user_msg_id, content, "user", "text", None)
-
-    # Build context snapshot (history, categories, pending tasks)
-    ctx = await ContextManager.build(current_message=content, history_after=cleared_at)
+    ctx = await ContextManager.build(
+        current_message=content, user_id=user_id, history_after=cleared_at
+    )
     logger.debug("\n%s", ctx.debug())
 
-    # Process via Claude
-    response = await claude.process_message(ctx)
+    response = await claude.process_message(ctx, user_id=user_id)
 
-    # Save assistant message
-    asst_msg_id = str(uuid.uuid4())
     history.save_message(
-        asst_msg_id,
-        response["answer"],
-        "assistant",
-        response["type"],
-        response.get("payload"),
+        str(uuid.uuid4()), response["answer"], "assistant",
+        response["type"], response.get("payload"), user_id=user_id,
     )
 
-    # Serialize payload for GraphQL (payload is returned as JSON string)
     serialized = dict(response)
     serialized["payload"] = _serialize_payload(response.get("payload"))
-
     return _ok({"send": serialized})
 
 
-async def _handle_complete_task(variables: dict) -> dict:
+async def _handle_complete_task(variables: dict, user_id: str) -> dict:
     task_id = variables.get("taskId", "").strip()
     if not task_id:
         return _err("taskId is required")
     try:
-        task = tasks_module.complete_task(task_id)
+        task = tasks_module.complete_task(task_id, user_id)
         return _ok({"completeTask": task})
     except ValueError as e:
         return _err(str(e))
 
 
-async def _handle_add_task(variables: dict) -> dict:
+async def _handle_add_task(variables: dict, user_id: str) -> dict:
     content = variables.get("content", "").strip()
     if not content:
         return _err("content is required")
     today = datetime.now(timezone.utc).date().isoformat()
-    date = variables.get("date", today)
-    tasks = tasks_module.save_tasks([content], date)
+    date  = variables.get("date", today)
+    tasks = tasks_module.save_tasks([content], date, user_id)
     return _ok({"addTask": tasks[0] if tasks else None})
 
 
-async def _handle_edit_task(variables: dict) -> dict:
+async def _handle_edit_task(variables: dict, user_id: str) -> dict:
     task_id = variables.get("taskId", "").strip()
     content = variables.get("content", "").strip()
     if not task_id or not content:
         return _err("taskId and content are required")
     try:
-        task = tasks_module.edit_task(task_id, content)
+        task = tasks_module.edit_task(task_id, content, user_id)
         return _ok({"editTask": task})
     except ValueError as e:
         return _err(str(e))
 
 
-async def _handle_delete_task(variables: dict) -> dict:
+async def _handle_delete_task(variables: dict, user_id: str) -> dict:
     task_id = variables.get("taskId", "").strip()
     if not task_id:
         return _err("taskId is required")
-    ok = tasks_module.delete_task(task_id)
+    ok = tasks_module.delete_task(task_id, user_id)
     return _ok({"deleteTask": ok})
 
 
-async def _handle_messages(variables: dict) -> dict:
-    limit = int(variables.get("limit", 50))
+async def _handle_messages(variables: dict, user_id: str) -> dict:
+    limit  = int(variables.get("limit", 50))
     cursor = variables.get("cursor", None)
-    page = history.get_messages(limit=limit, cursor=cursor)
-
-    # Serialize payload field in each message
-    messages = []
-    for msg in page["messages"]:
-        m = dict(msg)
-        m["payload"] = _serialize_payload(m.get("payload"))
-        messages.append(m)
-
-    return _ok({"messages": {"messages": messages, "pageInfo": page["pageInfo"]}})
+    page   = history.get_messages(limit=limit, cursor=cursor, user_id=user_id)
+    msgs   = [dict(m, payload=_serialize_payload(m.get("payload"))) for m in page["messages"]]
+    return _ok({"messages": {"messages": msgs, "pageInfo": page["pageInfo"]}})
 
 
-async def _handle_tasks(variables: dict) -> dict:
-    today = datetime.now(timezone.utc).date().isoformat()
-    date = variables.get("date", today)
-    task_page = tasks_module.get_tasks(date)
+async def _handle_tasks(variables: dict, user_id: str) -> dict:
+    today     = datetime.now(timezone.utc).date().isoformat()
+    date      = variables.get("date", today)
+    task_page = tasks_module.get_tasks(date, user_id)
     return _ok({"tasks": task_page})
 
 
-async def _handle_categories() -> dict:
-    cats = brain.get_categories()
+async def _handle_categories(user_id: str) -> dict:
+    cats = brain.get_categories(user_id)
     return _ok({"categories": cats})
 
 
-async def _handle_memories(variables: dict) -> dict:
+async def _handle_memories(variables: dict, user_id: str) -> dict:
     category = variables.get("category", None)
-    limit = int(variables.get("limit", 20))
-    cursor = variables.get("cursor", None)
+    limit    = int(variables.get("limit", 20))
+    cursor   = variables.get("cursor", None)
 
     if category:
-        page = brain.get_memories_by_category(category, limit=limit, cursor=cursor)
+        page = brain.get_memories_by_category(category, user_id, limit=limit, cursor=cursor)
     else:
-        # Return all memories (no category filter) via scroll
-        all_points = []
-        offset = int(cursor) if cursor else 0
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        offset  = int(cursor) if cursor else 0
         results, _ = brain._qdrant.scroll(
             collection_name=brain.COLLECTION_NAME,
-            limit=limit + 1,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False,
+            scroll_filter=Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))]),
+            limit=limit + 1, offset=offset, with_payload=True, with_vectors=False,
         )
         has_next = len(results) > limit
-        results = results[:limit]
         memories = [
-            {
-                "id": str(p.id),
-                "content": p.payload.get("content", ""),
-                "category": p.payload.get("category", ""),
-                "createdAt": p.payload.get("createdAt", ""),
-                "score": None,
-            }
-            for p in results
+            {"id": str(p.id), "content": p.payload.get("content", ""),
+             "category": p.payload.get("category", ""),
+             "createdAt": p.payload.get("createdAt", ""), "score": None}
+            for p in results[:limit]
         ]
-        page = {
-            "memories": memories,
-            "pageInfo": {
-                "hasNextPage": has_next,
-                "cursor": str(offset + limit) if has_next else None,
-            }
-        }
+        page = {"memories": memories, "pageInfo": {
+            "hasNextPage": has_next,
+            "cursor": str(offset + limit) if has_next else None,
+        }}
 
     return _ok({"memories": page})

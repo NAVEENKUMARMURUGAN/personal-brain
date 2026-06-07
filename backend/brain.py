@@ -123,13 +123,27 @@ def looks_like_query(content: str) -> bool:
     return False
 
 
-def is_duplicate(content: str, threshold: float = DEDUP_SCORE_THRESHOLD) -> bool:
-    """Return True if a near-identical memory already exists."""
+def _user_filter(user_id: str) -> Filter:
+    """Build a Qdrant filter that scopes queries to a single user."""
+    return Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))])
+
+
+def _user_and_filter(user_id: str, extra: Filter | None = None) -> Filter:
+    """Combine user_id filter with an optional additional filter."""
+    conditions = [FieldCondition(key="user_id", match=MatchValue(value=user_id))]
+    if extra and extra.must:
+        conditions.extend(extra.must)
+    return Filter(must=conditions)
+
+
+def is_duplicate(content: str, user_id: str, threshold: float = DEDUP_SCORE_THRESHOLD) -> bool:
+    """Return True if a near-identical memory already exists for this user."""
     try:
         vector = embed(content)
         results = _qdrant.search(
             collection_name=COLLECTION_NAME,
             query_vector=vector,
+            query_filter=_user_filter(user_id),
             limit=1,
         )
         if results and results[0].score >= threshold:
@@ -140,16 +154,17 @@ def is_duplicate(content: str, threshold: float = DEDUP_SCORE_THRESHOLD) -> bool
     return False
 
 
-def save_memory(content: str, category: str, source_id: Optional[str] = None, chunk_index: Optional[int] = None) -> dict:
-    """Save a single memory point. For chunked content, source_id links chunks together."""
+def save_memory(content: str, category: str, user_id: str, source_id: Optional[str] = None, chunk_index: Optional[int] = None) -> dict:
+    """Save a single memory point scoped to a user."""
     vector = embed(content)
     memory_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
 
     payload = {
-        "content": content,
-        "category": category,
+        "content":   content,
+        "category":  category,
         "createdAt": created_at,
+        "user_id":   user_id,
     }
     if source_id:
         payload["source_id"] = source_id
@@ -170,93 +185,95 @@ def save_memory(content: str, category: str, source_id: Optional[str] = None, ch
     }
 
 
-def chunk_and_save(content: str, category: str) -> dict:
-    """
-    For large content: split into chunks, dedup each, embed and store individually.
-    Returns a summary dict with chunk count and any skipped duplicates.
-    """
+def chunk_and_save(content: str, category: str, user_id: str) -> dict:
+    """Split into chunks, dedup per-user, embed and store individually."""
     chunks = _split_into_chunks(content)
-    source_id = str(uuid.uuid4())  # shared ID linking all chunks from this paste
+    source_id = str(uuid.uuid4())
 
     saved = []
     skipped = 0
     for i, chunk in enumerate(chunks):
-        if is_duplicate(chunk):
+        if is_duplicate(chunk, user_id):
             skipped += 1
             continue
-        memory = save_memory(chunk, category, source_id=source_id, chunk_index=i)
+        memory = save_memory(chunk, category, user_id, source_id=source_id, chunk_index=i)
         saved.append(memory)
 
-    logger.info("chunk_and_save: %d chunks, %d saved, %d skipped (dedup)", len(chunks), len(saved), skipped)
+    logger.info("chunk_and_save: %d chunks, %d saved, %d skipped", len(chunks), len(saved), skipped)
     return {
-        "saved_count": len(saved),
+        "saved_count":   len(saved),
         "skipped_count": skipped,
-        "total_chunks": len(chunks),
-        "source_id": source_id,
-        "category": category,
-        "memories": saved,
+        "total_chunks":  len(chunks),
+        "source_id":     source_id,
+        "category":      category,
+        "memories":      saved,
     }
 
 
-def search_memories(query: str, limit: int = 5) -> list[dict]:
+def search_memories(query: str, user_id: str, limit: int = 5) -> list[dict]:
+    """Search memories scoped to a user."""
     vector = embed(query)
     results = _qdrant.search(
         collection_name=COLLECTION_NAME,
         query_vector=vector,
+        query_filter=_user_filter(user_id),
         limit=limit,
     )
-    memories = []
-    for r in results:
-        memories.append({
-            "id": str(r.id),
-            "content": r.payload.get("content", ""),
-            "category": r.payload.get("category", ""),
-            "createdAt": r.payload.get("createdAt", ""),
-            "score": r.score,
-        })
-    return memories
+    return [{
+        "id":        str(r.id),
+        "content":   r.payload.get("content", ""),
+        "category":  r.payload.get("category", ""),
+        "createdAt": r.payload.get("createdAt", ""),
+        "score":     r.score,
+    } for r in results]
 
 
-def delete_memory(point_id: str) -> bool:
-    """Delete a single memory point from Qdrant by its UUID. Returns True if deleted."""
+def delete_memory(point_id: str, user_id: str) -> bool:
+    """Delete a memory point — only if it belongs to this user."""
     from qdrant_client.models import PointIdsList
     try:
+        # Verify ownership before deleting
+        result = _qdrant.retrieve(collection_name=COLLECTION_NAME, ids=[point_id], with_payload=True)
+        if not result or result[0].payload.get("user_id") != user_id:
+            logger.warning("Delete denied: point %s does not belong to user %s", point_id, user_id)
+            return False
         _qdrant.delete(
             collection_name=COLLECTION_NAME,
             points_selector=PointIdsList(points=[point_id]),
         )
-        logger.info("Deleted memory point %s", point_id)
         return True
     except Exception as e:
         logger.error("Failed to delete memory %s: %s", point_id, e)
         return False
 
 
-def delete_memories_by_source(source_id: str) -> int:
-    """Delete all chunks that share a source_id (i.e. all chunks of one uploaded document)."""
+def delete_memories_by_source(source_id: str, user_id: str) -> int:
+    """Delete all chunks of an uploaded document belonging to this user."""
     from qdrant_client.models import FilterSelector
     try:
-        result = _qdrant.delete(
+        _qdrant.delete(
             collection_name=COLLECTION_NAME,
             points_selector=FilterSelector(
-                filter=Filter(
-                    must=[FieldCondition(key="source_id", match=MatchValue(value=source_id))]
-                )
+                filter=Filter(must=[
+                    FieldCondition(key="source_id", match=MatchValue(value=source_id)),
+                    FieldCondition(key="user_id",   match=MatchValue(value=user_id)),
+                ])
             ),
         )
-        logger.info("Deleted all chunks for source_id=%s", source_id)
-        return 1  # success
+        return 1
     except Exception as e:
         logger.error("Failed to delete source %s: %s", source_id, e)
         return 0
 
 
-def get_categories() -> list[dict]:
+def get_categories(user_id: str) -> list[dict]:
+    """Return knowledge categories for a specific user."""
     all_points = []
     offset = None
     while True:
         batch, offset = _qdrant.scroll(
             collection_name=COLLECTION_NAME,
+            scroll_filter=_user_filter(user_id),
             limit=100,
             offset=offset,
             with_payload=True,
@@ -271,24 +288,22 @@ def get_categories() -> list[dict]:
         cat = point.payload.get("category", "Uncategorized")
         counts[cat] = counts.get(cat, 0) + 1
 
-    categories = []
-    for name, count in sorted(counts.items(), key=lambda x: -x[1]):
-        categories.append({
-            "name": name,
-            "icon": CATEGORY_ICONS.get(name, DEFAULT_ICON),
-            "count": count,
-        })
-    return categories
+    return [
+        {"name": name, "icon": CATEGORY_ICONS.get(name, DEFAULT_ICON), "count": count}
+        for name, count in sorted(counts.items(), key=lambda x: -x[1])
+    ]
 
 
-def get_memories_by_category(category: str, limit: int = 20, cursor: Optional[str] = None) -> dict:
+def get_memories_by_category(category: str, user_id: str, limit: int = 20, cursor: Optional[str] = None) -> dict:
+    """Return paginated memories for a specific category and user."""
     offset = int(cursor) if cursor else 0
 
     results, _ = _qdrant.scroll(
         collection_name=COLLECTION_NAME,
-        scroll_filter=Filter(
-            must=[FieldCondition(key="category", match=MatchValue(value=category))]
-        ),
+        scroll_filter=Filter(must=[
+            FieldCondition(key="category", match=MatchValue(value=category)),
+            FieldCondition(key="user_id",  match=MatchValue(value=user_id)),
+        ]),
         limit=limit + 1,
         offset=offset,
         with_payload=True,
@@ -296,24 +311,18 @@ def get_memories_by_category(category: str, limit: int = 20, cursor: Optional[st
     )
 
     has_next = len(results) > limit
-    results = results[:limit]
-
-    memories = []
-    for point in results:
-        memories.append({
-            "id": str(point.id),
-            "content": point.payload.get("content", ""),
-            "category": point.payload.get("category", ""),
-            "createdAt": point.payload.get("createdAt", ""),
-            "score": None,
-        })
-
-    next_cursor = str(offset + limit) if has_next else None
+    memories = [{
+        "id":        str(p.id),
+        "content":   p.payload.get("content", ""),
+        "category":  p.payload.get("category", ""),
+        "createdAt": p.payload.get("createdAt", ""),
+        "score":     None,
+    } for p in results[:limit]]
 
     return {
         "memories": memories,
         "pageInfo": {
             "hasNextPage": has_next,
-            "cursor": next_cursor,
+            "cursor":      str(offset + limit) if has_next else None,
         }
     }

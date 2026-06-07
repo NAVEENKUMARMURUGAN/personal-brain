@@ -53,30 +53,29 @@ class ContextManager:
     async def build(
         cls,
         current_message: str,
+        user_id: str,
         history_limit: int = 10,
         memory_limit: int = 8,
         history_after: str | None = None,
     ) -> "ContextManager":
         """Build a full context snapshot for one request.
 
-        history_after: ISO timestamp — skip any history messages before this
-            time. Set when the user clears the chat so prior conversation is
-            excluded from context entirely.
+        user_id:       Scopes all data (history, tasks, memories) to this user.
+        history_after: ISO timestamp — skip messages before this time (cleared chat).
         """
         today = datetime.now(timezone.utc).date().isoformat()
 
-        turns = history_module.get_recent_turns(limit=history_limit, after=history_after)
+        turns = history_module.get_recent_turns(
+            limit=history_limit, after=history_after, user_id=user_id
+        )
 
         # Strip the current message if it was already saved before build() was called
         if turns and turns[-1]["role"] == "user" and turns[-1]["content"] == current_message:
             turns = turns[:-1]
 
-        categories = brain.get_categories()
-        pending_tasks = tasks_module.get_pending_tasks(today)
-
-        # Always fetch relevant memories — needed for save_info (dedup/category),
-        # complete_task (semantic match), question (answering), and clarify.
-        relevant_memories = brain.search_memories(current_message, limit=memory_limit)
+        categories    = brain.get_categories(user_id)
+        pending_tasks = tasks_module.get_pending_tasks(today, user_id)
+        relevant_memories = brain.search_memories(current_message, user_id, limit=memory_limit)
 
         ctx = cls(
             current_message=current_message,

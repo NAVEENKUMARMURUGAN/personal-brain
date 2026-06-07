@@ -446,8 +446,13 @@ export default function TasksPage() {
   }, [addTaskMutation])
 
   const handleCarryForward = useCallback(async () => {
+    const token = localStorage.getItem('pb-token')
     await fetch(`${API_URL}/graphql`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ query: 'mutation Send($content: String!) { send(content: $content) { answer } }', variables: { content: 'carry forward all pending tasks' } })
     })
     await r0(); await r1()
