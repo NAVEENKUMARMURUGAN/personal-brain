@@ -4,10 +4,11 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-SQLITE_PATH = os.getenv("SQLITE_PATH", "/data/history.db")
+SQLITE_PATH = os.getenv("SQLITE_PATH", "/app/history.db")
 
-# Ensure the directory exists before any connection attempt
-os.makedirs(os.path.dirname(os.path.abspath(SQLITE_PATH)), exist_ok=True)
+# Ensure the parent directory exists before any connection attempt
+_db_dir = os.path.dirname(os.path.abspath(SQLITE_PATH))
+os.makedirs(_db_dir, exist_ok=True)
 
 
 def get_conn():
