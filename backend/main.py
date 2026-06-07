@@ -91,8 +91,20 @@ EXTRACTORS = {
 
 @app.on_event("startup")
 async def startup():
-    brain.ensure_collections()
-    tasks_module.ensure_collections()
+    # Retry Qdrant connection — on Railway, Qdrant may take a moment to be ready
+    import time
+    for attempt in range(10):
+        try:
+            brain.ensure_collections()
+            tasks_module.ensure_collections()
+            logger.info("Qdrant collections ready")
+            break
+        except Exception as e:
+            if attempt < 9:
+                logger.warning("Qdrant not ready (attempt %d/10): %s — retrying in 3s", attempt + 1, e)
+                time.sleep(3)
+            else:
+                logger.error("Qdrant unreachable after 10 attempts: %s", e)
     history.ensure_db()
 
 
