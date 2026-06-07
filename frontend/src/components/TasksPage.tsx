@@ -194,10 +194,13 @@ function AddTaskRow({ date, onAdd }: { date: string; onAdd: (content: string, da
   const [open,  setOpen]  = useState(false)
   const [value, setValue] = useState('')
   const inputRef          = useRef<HTMLInputElement>(null)
+  const committedRef      = useRef(false)
 
-  useEffect(() => { if (open) inputRef.current?.focus() }, [open])
+  useEffect(() => { if (open) { committedRef.current = false; inputRef.current?.focus() } }, [open])
 
   const commit = () => {
+    if (committedRef.current) return
+    committedRef.current = true
     const t = value.trim()
     if (t) { onAdd(t, date); setValue('') }
     setOpen(false)
