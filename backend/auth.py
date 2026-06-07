@@ -21,20 +21,20 @@ import jwt  # PyJWT
 
 logger = logging.getLogger(__name__)
 
-# ── Config ─────────────────────────────────────────────────────
-GOOGLE_CLIENT_ID     = os.getenv("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
-JWT_SECRET           = os.getenv("JWT_SECRET", "change-me-in-production-use-a-random-32-char-string")
-JWT_ALGORITHM        = "HS256"
-JWT_EXPIRY_DAYS      = 30
+# ── Config — read at call time so Railway env vars are always current ─
+JWT_ALGORITHM   = "HS256"
+JWT_EXPIRY_DAYS = 30
 
-FRONTEND_URL         = os.getenv("FRONTEND_URL", "http://localhost:3000")
+GOOGLE_AUTH_URL     = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL    = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
 
-GOOGLE_AUTH_URL      = "https://accounts.google.com/o/oauth2/v2/auth"
-GOOGLE_TOKEN_URL     = "https://oauth2.googleapis.com/token"
-GOOGLE_USERINFO_URL  = "https://www.googleapis.com/oauth2/v3/userinfo"
+SQLITE_PATH = os.getenv("SQLITE_PATH", "/app/history.db")
 
-SQLITE_PATH          = os.getenv("SQLITE_PATH", "/app/history.db")
+
+def _cfg(key: str, default: str = "") -> str:
+    """Read env var at call time — never cache at import time."""
+    return os.getenv(key, default)
 
 # ── DB helpers ─────────────────────────────────────────────────
 
@@ -110,15 +110,12 @@ def issue_jwt(user: dict) -> str:
         "iat":   int(time.time()),
         "exp":   int(time.time()) + JWT_EXPIRY_DAYS * 86400,
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, _cfg("JWT_SECRET", "dev-secret"), algorithm=JWT_ALGORITHM)
 
 
 def verify_jwt(token: str) -> dict:
-    """
-    Verify and decode a JWT. Returns the payload dict.
-    Raises jwt.ExpiredSignatureError or jwt.InvalidTokenError on failure.
-    """
-    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    """Verify and decode a JWT. Raises on failure."""
+    return jwt.decode(token, _cfg("JWT_SECRET", "dev-secret"), algorithms=[JWT_ALGORITHM])
 
 
 def extract_user_id(authorization: str | None) -> str | None:
@@ -141,7 +138,7 @@ def extract_user_id(authorization: str | None) -> str | None:
 def google_auth_url(redirect_uri: str) -> str:
     """Build the Google OAuth consent screen URL."""
     params = {
-        "client_id":     GOOGLE_CLIENT_ID,
+        "client_id":     _cfg("GOOGLE_CLIENT_ID"),
         "redirect_uri":  redirect_uri,
         "response_type": "code",
         "scope":         "openid email profile",
@@ -152,11 +149,10 @@ def google_auth_url(redirect_uri: str) -> str:
 
 def exchange_code(code: str, redirect_uri: str) -> dict:
     """Exchange authorization code for user info. Returns user dict."""
-    # Step 1: exchange code for tokens
     token_resp = http_requests.post(GOOGLE_TOKEN_URL, data={
         "code":          code,
-        "client_id":     GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
+        "client_id":     _cfg("GOOGLE_CLIENT_ID"),
+        "client_secret": _cfg("GOOGLE_CLIENT_SECRET"),
         "redirect_uri":  redirect_uri,
         "grant_type":    "authorization_code",
     }, timeout=10)
