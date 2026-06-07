@@ -6,6 +6,9 @@ from typing import Optional
 
 SQLITE_PATH = os.getenv("SQLITE_PATH", "/data/history.db")
 
+# Ensure the directory exists before any connection attempt
+os.makedirs(os.path.dirname(os.path.abspath(SQLITE_PATH)), exist_ok=True)
+
 
 def get_conn():
     conn = sqlite3.connect(SQLITE_PATH)
