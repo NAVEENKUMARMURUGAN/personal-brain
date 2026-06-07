@@ -243,7 +243,7 @@ async def telegram_webhook(request: Request):
     """Receive updates from Telegram and process them."""
     try:
         update = await request.json()
-        asyncio.create_task(telegram_bot.handle_update(update))
+        asyncio.create_task(telegram_bot._handle_update_safe(update))
     except Exception as e:
         logger.error("Telegram webhook parse error: %s", e)
     return JSONResponse({"ok": True})

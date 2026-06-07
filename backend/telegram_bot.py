@@ -178,9 +178,13 @@ async def _transcribe_voice(file_id: str) -> str:
         tmp.write(audio_bytes)
         tmp_path = tmp.name
     try:
-        model = _get_whisper()
-        segments, _ = model.transcribe(tmp_path, beam_size=5)
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        # Run blocking Whisper transcription in a thread pool so we don't freeze the event loop
+        loop = asyncio.get_event_loop()
+        def _run():
+            model = _get_whisper()
+            segments, _ = model.transcribe(tmp_path, beam_size=5)
+            return " ".join(seg.text.strip() for seg in segments).strip()
+        return await loop.run_in_executor(None, _run)
     finally:
         import os as _os
         _os.unlink(tmp_path)
@@ -286,6 +290,14 @@ async def handle_update(update: dict):
     except Exception as e:
         logger.error("Error handling Telegram message: %s", e, exc_info=True)
         await send_message(chat_id, "Something went wrong. Please try again.")
+
+
+async def _handle_update_safe(update: dict):
+    """Wrapper that logs any uncaught exception from handle_update."""
+    try:
+        await handle_update(update)
+    except Exception as e:
+        logger.error("Unhandled error in handle_update: %s", e, exc_info=True)
 
 
 # ── Webhook registration ────────────────────────────────────────
