@@ -121,6 +121,19 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/env")
+async def debug_env():
+    """Temporary debug — shows which auth env vars are loaded (not the values)."""
+    import os
+    return {
+        "GOOGLE_CLIENT_ID_set":     bool(os.getenv("GOOGLE_CLIENT_ID")),
+        "GOOGLE_CLIENT_SECRET_set": bool(os.getenv("GOOGLE_CLIENT_SECRET")),
+        "JWT_SECRET_set":           bool(os.getenv("JWT_SECRET")),
+        "BACKEND_URL":              os.getenv("BACKEND_URL", "NOT SET"),
+        "FRONTEND_URL":             os.getenv("FRONTEND_URL", "NOT SET"),
+    }
+
+
 # ── Auth routes ────────────────────────────────────────────────
 
 @app.get("/auth/google")
