@@ -1,0 +1,65 @@
+.memory-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-base);
+  border-radius: 12px;
+  overflow: hidden;
+  width: 100%;
+  max-width: 620px;
+  margin: 4px 0;
+}
+
+.memory-card__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.memory-card__icon { font-size: 16px; flex-shrink: 0; }
+
+.memory-card__category {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--label-color);
+}
+
+.memory-card__list { display: flex; flex-direction: column; }
+
+.memory-card__item {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memory-card__item:last-child { border-bottom: none; }
+
+.memory-card__content {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memory-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memory-card__date {
+  font-size: 12px;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.memory-card__empty {
+  padding: 16px;
+  font-size: 14px;
+  color: var(--text-faint);
+}

@@ -1,0 +1,46 @@
+# Environment secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# HuggingFace model cache (large files)
+.hf_cache/
+
+# Docker volumes / local data
+*.db
+*.sqlite
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# OpenCode
+.opencode/
