@@ -147,19 +147,27 @@ async def google_login():
 
 
 @app.get("/auth/google/callback")
-async def google_callback(code: str, state: Optional[str] = None, error: Optional[str] = None):
+async def google_callback(request: Request, code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     """Handle Google OAuth callback, issue JWT, redirect to frontend."""
+    logger.info("OAuth callback — error=%s code_present=%s params=%s", error, bool(code), dict(request.query_params))
     if error:
-        return RedirectResponse(f"{FRONTEND_URL}/login?error={error}")
+        logger.error("Google returned error: %s", error)
+        return RedirectResponse(f"{FRONTEND_URL}?error={error}")
+    if not code:
+        logger.error("No code in callback. Params: %s", dict(request.query_params))
+        return RedirectResponse(f"{FRONTEND_URL}?error=no_code")
     try:
         redirect_uri = f"{BACKEND_URL}/auth/google/callback"
+        logger.info("Exchanging code with redirect_uri=%s", redirect_uri)
         info  = auth.exchange_code(code, redirect_uri)
+        logger.info("Got user info: email=%s", info["email"])
         user  = auth.upsert_user(info["google_id"], info["email"], info["name"], info["avatar_url"])
         token = auth.issue_jwt(user)
+        logger.info("Issuing JWT for user=%s, redirecting to frontend", user["id"])
         return RedirectResponse(f"{FRONTEND_URL}?token={token}")
     except Exception as e:
         logger.error("OAuth callback error: %s", e, exc_info=True)
-        return RedirectResponse(f"{FRONTEND_URL}/login?error=auth_failed")
+        return RedirectResponse(f"{FRONTEND_URL}?error=auth_failed")
 
 
 @app.get("/auth/me")
