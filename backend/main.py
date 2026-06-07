@@ -123,14 +123,16 @@ async def health():
 
 @app.get("/debug/env")
 async def debug_env():
-    """Temporary debug — shows which auth env vars are loaded (not the values)."""
     import os
+    redirect_uri = f"{os.getenv('BACKEND_URL', '')}/auth/google/callback"
+    oauth_url = auth.google_auth_url(redirect_uri)
     return {
         "GOOGLE_CLIENT_ID_set":     bool(os.getenv("GOOGLE_CLIENT_ID")),
         "GOOGLE_CLIENT_SECRET_set": bool(os.getenv("GOOGLE_CLIENT_SECRET")),
         "JWT_SECRET_set":           bool(os.getenv("JWT_SECRET")),
         "BACKEND_URL":              os.getenv("BACKEND_URL", "NOT SET"),
         "FRONTEND_URL":             os.getenv("FRONTEND_URL", "NOT SET"),
+        "oauth_url_preview":        oauth_url[:120],
     }
 
 
