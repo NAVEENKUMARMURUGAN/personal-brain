@@ -1,4 +1,5 @@
 import os
+import asyncio
 import tempfile
 import logging
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ import tasks as tasks_module
 import history
 import graphql_handler
 import auth
+import telegram_bot
 from context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
@@ -108,6 +110,10 @@ async def startup():
                 logger.error("Qdrant unreachable after 10 attempts: %s", e)
     history.ensure_db()
     auth.ensure_users_table()
+    telegram_bot.ensure_telegram_table()
+    telegram_bot.start_scheduler()
+    if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("BACKEND_URL"):
+        await telegram_bot.set_webhook(BACKEND_URL)
 
 
 # ── Routes ─────────────────────────────────────────────────────
@@ -228,6 +234,19 @@ async def transcribe(
     except Exception as e:
         logger.error("Transcription error: %s", e, exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Telegram webhook ───────────────────────────────────────────
+
+@app.post("/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """Receive updates from Telegram and process them."""
+    try:
+        update = await request.json()
+        asyncio.create_task(telegram_bot.handle_update(update))
+    except Exception as e:
+        logger.error("Telegram webhook parse error: %s", e)
+    return JSONResponse({"ok": True})
 
 
 @app.delete("/memory/{point_id}")
