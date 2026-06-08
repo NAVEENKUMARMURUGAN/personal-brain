@@ -210,6 +210,59 @@ async def _send_reminder(chat_id: int | str, text: str):
     await send_message(chat_id, f"Reminder: {text}")
 
 
+# ── Response formatting for Telegram ──────────────────────────
+
+def _format_response(result: dict) -> str:
+    """
+    Convert structured agent response into plain Telegram-friendly text.
+    The web app renders cards; Telegram gets formatted Markdown instead.
+    """
+    answer  = result.get("answer", "Done.")
+    rtype   = result.get("type", "text")
+    payload = result.get("payload", {})
+    sources = result.get("sources", [])
+
+    if rtype == "task_list":
+        pending   = payload.get("pending", [])
+        completed = payload.get("completed", [])
+        lines = [answer] if answer else []
+        if pending:
+            lines.append("\n*Pending:*")
+            for t in pending:
+                lines.append(f"  • {t['content']}")
+        if completed:
+            lines.append("\n*Completed:*")
+            for t in completed:
+                lines.append(f"  ✓ {t['content']}")
+        if not pending and not completed:
+            lines.append("No tasks found.")
+        return "\n".join(lines)
+
+    elif rtype == "memory_list":
+        memories = payload.get("memories", [])
+        lines = [answer] if answer else []
+        for m in memories:
+            lines.append(f"  • [{m.get('category', '')}] {m.get('content', '')}")
+        return "\n".join(lines)
+
+    elif rtype == "category_list":
+        cats  = payload.get("categories", [])
+        lines = [answer] if answer else []
+        for c in cats:
+            lines.append(f"  {c.get('icon', '•')} *{c.get('name', '')}* — {c.get('count', 0)} items")
+        return "\n".join(lines)
+
+    elif sources:
+        # search result with sources
+        lines = [answer]
+        lines.append("\n*Sources:*")
+        for s in sources[:5]:
+            lines.append(f"  • [{s.get('category', '')}] {s.get('content', '')[:120]}")
+        return "\n".join(lines)
+
+    return answer
+
+
 # ── Message processing ─────────────────────────────────────────
 
 async def handle_update(update: dict):
@@ -289,7 +342,7 @@ async def handle_update(update: dict):
 
         ctx = await ContextManager.build(current_message=text, user_id=user_id)
         result = await claude.process_message(ctx, user_id)
-        answer = result.get("answer", "Done.")
+        answer = _format_response(result)
 
         logger.info("Claude returned answer=%r", answer[:120])
 
