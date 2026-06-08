@@ -19,6 +19,7 @@ import auth
 import telegram_bot
 from context_manager import ContextManager
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
