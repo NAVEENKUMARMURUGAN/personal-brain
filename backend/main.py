@@ -246,9 +246,10 @@ async def telegram_webhook(request: Request):
     logger.info("Telegram webhook hit — body: %s", body[:500].decode("utf-8", errors="replace"))
     try:
         update = json.loads(body)
-        asyncio.create_task(telegram_bot._handle_update_safe(update))
+        # Process synchronously so errors appear in logs immediately
+        await telegram_bot._handle_update_safe(update)
     except Exception as e:
-        logger.error("Telegram webhook parse error: %s", e)
+        logger.error("Telegram webhook parse error: %s", e, exc_info=True)
     return JSONResponse({"ok": True})
 
 
