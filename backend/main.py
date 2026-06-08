@@ -1,4 +1,5 @@
 import os
+import json
 import asyncio
 import tempfile
 import logging
@@ -241,12 +242,27 @@ async def transcribe(
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
     """Receive updates from Telegram and process them."""
+    body = await request.body()
+    logger.info("Telegram webhook hit — body: %s", body[:500].decode("utf-8", errors="replace"))
     try:
-        update = await request.json()
+        update = json.loads(body)
         asyncio.create_task(telegram_bot._handle_update_safe(update))
     except Exception as e:
         logger.error("Telegram webhook parse error: %s", e)
     return JSONResponse({"ok": True})
+
+
+@app.get("/telegram/debug")
+async def telegram_debug():
+    """Debug endpoint — shows token status, allowed IDs, and webhook info."""
+    allowed_raw = os.getenv("TELEGRAM_ALLOWED_IDS", "NOT SET")
+    token_set   = bool(os.getenv("TELEGRAM_BOT_TOKEN"))
+    info        = await telegram_bot._tg_post("getWebhookInfo", {})
+    return JSONResponse({
+        "token_set":       token_set,
+        "allowed_ids_raw": repr(allowed_raw),
+        "webhook_info":    info.get("result", {}),
+    })
 
 
 @app.delete("/memory/{point_id}")

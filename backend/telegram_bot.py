@@ -218,6 +218,7 @@ async def handle_update(update: dict):
     """
     message = update.get("message") or update.get("edited_message")
     if not message:
+        logger.info("Telegram update has no message field — keys: %s", list(update.keys()))
         return  # ignore non-message updates (inline queries, etc.)
 
     chat_id    = message["chat"]["id"]
@@ -226,20 +227,28 @@ async def handle_update(update: dict):
     username   = from_user.get("username", "")
     first_name = from_user.get("first_name", "")
 
+    logger.info("Telegram message — chat_id=%s tg_id=%s username=%s first_name=%s",
+                chat_id, tg_id, username, first_name)
+
     # ── Access control ──────────────────────────────────────────
     allowed = _allowed_ids()
+    logger.info("Access check — tg_id=%r allowed=%r in_set=%s", tg_id, allowed, tg_id in allowed)
     if allowed and tg_id not in allowed:
+        logger.warning("Rejected tg_id=%s not in allowed=%s", tg_id, allowed)
         await send_message(chat_id, "Sorry, you are not authorised to use this bot.")
         return
 
     if not tg_id:
+        logger.warning("Empty tg_id — skipping")
         return
 
     # ── Resolve brain user ──────────────────────────────────────
     user_id = get_or_create_user(tg_id, username, first_name)
+    logger.info("Resolved brain user_id=%s for tg_id=%s", user_id[:8], tg_id)
 
     # ── Extract text ────────────────────────────────────────────
     text = message.get("text", "").strip()
+    logger.info("Message text=%r voice=%s", text[:100] if text else "", bool(message.get("voice")))
 
     # Voice message → transcribe
     voice = message.get("voice") or message.get("audio")
@@ -274,18 +283,21 @@ async def handle_update(update: dict):
 
     # ── Route through Claude agent ──────────────────────────────
     try:
-        # Show typing indicator
+        logger.info("Calling Claude agent for user=%s message=%r", user_id[:8], text[:80])
         await _tg_post("sendChatAction", {"chat_id": chat_id, "action": "typing"})
 
         ctx = await ContextManager.build(current_message=text, user_id=user_id)
         result = await claude.process_message(ctx, user_id)
         answer = result.get("answer", "Done.")
 
+        logger.info("Claude returned answer=%r", answer[:120])
+
         # Save to chat history
         history.add_message(user_id, "user", text)
         history.add_message(user_id, "assistant", answer)
 
-        await send_message(chat_id, answer)
+        send_result = await send_message(chat_id, answer)
+        logger.info("send_message result: %s", send_result.get("ok"))
 
     except Exception as e:
         logger.error("Error handling Telegram message: %s", e, exc_info=True)
