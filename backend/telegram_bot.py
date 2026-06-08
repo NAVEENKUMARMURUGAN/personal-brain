@@ -294,8 +294,8 @@ async def handle_update(update: dict):
         logger.info("Claude returned answer=%r", answer[:120])
 
         # Save to chat history
-        history.add_message(user_id, "user", text)
-        history.add_message(user_id, "assistant", answer)
+        history.save_message(user_id, "user", text)
+        history.save_message(user_id, "assistant", answer)
 
         send_result = await send_message(chat_id, answer)
         logger.info("send_message result: %s", send_result.get("ok"))
