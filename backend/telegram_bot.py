@@ -42,7 +42,8 @@ def _bot_token() -> str:
 
 def _allowed_ids() -> set[str]:
     raw = os.getenv("TELEGRAM_ALLOWED_IDS", "")
-    return {i.strip() for i in raw.split(",") if i.strip()}
+    # Strip surrounding quotes Railway may add (e.g. '8842935233' → 8842935233)
+    return {i.strip().strip("'\"") for i in raw.split(",") if i.strip().strip("'\"")}
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
