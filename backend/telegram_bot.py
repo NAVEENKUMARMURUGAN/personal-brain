@@ -123,8 +123,85 @@ def ensure_telegram_table():
             created_at   TEXT NOT NULL
         )
     """)
+    # Add linked_google_user_id column if it doesn't exist (migration)
+    try:
+        conn.execute("ALTER TABLE telegram_users ADD COLUMN linked_google_user_id TEXT")
+    except Exception:
+        pass  # column already exists
     conn.commit()
     conn.close()
+
+
+def link_telegram_user(telegram_id: str, google_user_id: str) -> bool:
+    """
+    Link a Telegram ID to a Google OAuth user_id.
+    After linking, all Telegram messages from this Telegram ID will be
+    routed to the Google user's data (tasks, memories, etc).
+    Returns True on success.
+    """
+    conn = _get_conn()
+    try:
+        existing = conn.execute(
+            "SELECT user_id FROM telegram_users WHERE telegram_id = ?", (telegram_id,)
+        ).fetchone()
+        if existing:
+            # Update the existing Telegram user row to use the Google user's UUID
+            conn.execute(
+                "UPDATE telegram_users SET user_id = ?, linked_google_user_id = ? WHERE telegram_id = ?",
+                (google_user_id, google_user_id, telegram_id),
+            )
+        else:
+            # Telegram user hasn't messaged the bot yet — pre-register the link
+            conn.execute(
+                """INSERT INTO telegram_users (telegram_id, user_id, linked_google_user_id, username, first_name, created_at)
+                   VALUES (?, ?, ?, '', '', ?)""",
+                (telegram_id, google_user_id, google_user_id, datetime.now(timezone.utc).isoformat()),
+            )
+        conn.commit()
+        logger.info("Linked Telegram %s → Google user %s", telegram_id, google_user_id[:8])
+        return True
+    except Exception as e:
+        logger.error("Error linking Telegram user: %s", e, exc_info=True)
+        return False
+    finally:
+        conn.close()
+
+
+def unlink_telegram_user(google_user_id: str) -> bool:
+    """Remove the Telegram ↔ Google user link. Telegram user reverts to their own data silo."""
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "UPDATE telegram_users SET user_id = telegram_id, linked_google_user_id = NULL WHERE linked_google_user_id = ?",
+            (google_user_id,)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error("Error unlinking Telegram user: %s", e, exc_info=True)
+        return False
+    finally:
+        conn.close()
+
+
+def get_telegram_link_status(google_user_id: str) -> dict:
+    """Return whether a Google user has a linked Telegram account."""
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT telegram_id, username, first_name FROM telegram_users WHERE linked_google_user_id = ?",
+            (google_user_id,)
+        ).fetchone()
+        if row:
+            return {
+                "linked": True,
+                "telegram_id": row["telegram_id"],
+                "username": row["username"] or "",
+                "first_name": row["first_name"] or "",
+            }
+        return {"linked": False}
+    finally:
+        conn.close()
 
 
 def get_or_create_user(telegram_id: str, username: str, first_name: str) -> str:

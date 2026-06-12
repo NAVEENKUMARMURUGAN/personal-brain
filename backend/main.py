@@ -180,15 +180,56 @@ async def google_callback(request: Request, code: Optional[str] = None, state: O
 
 @app.get("/auth/me")
 async def get_me(authorization: Optional[str] = Header(None)):
-    """Return the current user from JWT."""
+    """Return the current user from JWT, including Telegram link status."""
     user_id = auth.extract_user_id(authorization)
     if not user_id:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     user = auth.get_user_by_id(user_id)
     if not user:
         return JSONResponse({"error": "User not found"}, status_code=404)
-    return JSONResponse({"id": user["id"], "email": user["email"],
-                         "name": user["name"], "avatar_url": user["avatar_url"]})
+    telegram_status = telegram_bot.get_telegram_link_status(user_id)
+    return JSONResponse({
+        "id":             user["id"],
+        "email":          user["email"],
+        "name":           user["name"],
+        "avatar_url":     user["avatar_url"],
+        "telegram":       telegram_status,
+    })
+
+
+@app.post("/telegram/link")
+async def link_telegram(request: Request, authorization: Optional[str] = Header(None)):
+    """
+    Link a Telegram account to the currently authenticated Google user.
+    The user sends their Telegram numeric ID (from @userinfobot).
+    After linking, Telegram messages from that ID are routed to this user's data.
+    """
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    body = await request.json()
+    telegram_id = str(body.get("telegram_id", "")).strip()
+    if not telegram_id:
+        return JSONResponse({"error": "telegram_id is required"}, status_code=400)
+    ok = telegram_bot.link_telegram_user(telegram_id, user_id)
+    if ok:
+        return JSONResponse({"linked": True, "telegram_id": telegram_id})
+    return JSONResponse({"error": "Failed to link Telegram account"}, status_code=500)
+
+
+@app.delete("/telegram/link")
+async def unlink_telegram(authorization: Optional[str] = Header(None)):
+    """Unlink the Telegram account from the current Google user."""
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    status = telegram_bot.get_telegram_link_status(user_id)
+    if not status["linked"]:
+        return JSONResponse({"error": "No Telegram account linked"}, status_code=404)
+    ok = telegram_bot.unlink_telegram_user(user_id)
+    if ok:
+        return JSONResponse({"unlinked": True})
+    return JSONResponse({"error": "Failed to unlink"}, status_code=500)
 
 
 # ── GraphQL ────────────────────────────────────────────────────

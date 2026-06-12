@@ -4,6 +4,7 @@ import RightPanel from './components/RightPanel'
 import TasksPage from './components/TasksPage'
 import KnowledgePage from './components/KnowledgePage'
 import LoginPage from './components/LoginPage'
+import SettingsPage from './components/SettingsPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import './App.css'
 
@@ -153,6 +154,10 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
       ) : page === 'knowledge' ? (
         <div style={{ gridColumn: '2 / 4', overflow: 'hidden' }}>
           <KnowledgePage />
+        </div>
+      ) : page === 'settings' ? (
+        <div style={{ gridColumn: '2 / 4', overflow: 'auto' }}>
+          <SettingsPage />
         </div>
       ) : (
         <>
