@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import Chat from './components/Chat'
 import RightPanel from './components/RightPanel'
 import TasksPage from './components/TasksPage'
@@ -6,6 +6,7 @@ import KnowledgePage from './components/KnowledgePage'
 import LoginPage from './components/LoginPage'
 import SettingsPage from './components/SettingsPage'
 import { AuthProvider, useAuth } from './AuthContext'
+import { API_URL } from './config'
 import './App.css'
 
 type Theme = 'dark' | 'light'
@@ -15,6 +16,16 @@ type NavPage = 'chat' | 'knowledge' | 'tasks' | 'settings'
 interface SystemEvent {
   level: 'OK' | 'INFO' | 'WARN'
   message: string
+}
+
+interface Notification {
+  id: string
+  type: string
+  title: string
+  body: string
+  source: string
+  read: number
+  created_at: string
 }
 
 function getInitialTheme(): Theme {
@@ -58,7 +69,149 @@ export default function App() {
   )
 }
 
+function NotificationBell({ token }: { token: string | null }) {
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [open, setOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  const fetchNotifications = useCallback(async () => {
+    if (!token) return
+    try {
+      const res = await fetch(`${API_URL}/notifications?unread_only=true&limit=20`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setNotifications(data.notifications ?? [])
+      }
+    } catch { /* silent */ }
+  }, [token])
+
+  // Poll every 30 seconds
+  useEffect(() => {
+    fetchNotifications()
+    const interval = setInterval(fetchNotifications, 30_000)
+    return () => clearInterval(interval)
+  }, [fetchNotifications])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const handleOpen = async () => {
+    setOpen(o => !o)
+    if (!open && notifications.length > 0 && token) {
+      // Mark all as read when opening
+      await fetch(`${API_URL}/notifications/read`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      // Clear after a short delay so user sees them first
+      setTimeout(() => setNotifications([]), 3000)
+    }
+  }
+
+  const unreadCount = notifications.length
+
+  const formatTime = (iso: string) => {
+    try {
+      const d = new Date(iso)
+      const now = new Date()
+      const diffMs = now.getTime() - d.getTime()
+      const diffMins = Math.floor(diffMs / 60000)
+      if (diffMins < 1) return 'just now'
+      if (diffMins < 60) return `${diffMins}m ago`
+      if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`
+      return d.toLocaleDateString()
+    } catch { return '' }
+  }
+
+  return (
+    <div ref={panelRef} style={{ position: 'relative' }}>
+      <button
+        className="app__session-icon"
+        title="Notifications"
+        onClick={handleOpen}
+        style={{ position: 'relative' }}
+      >
+        🔔
+        {unreadCount > 0 && (
+          <span style={{
+            position: 'absolute', top: '-4px', right: '-4px',
+            background: '#f87171', color: '#fff', borderRadius: '50%',
+            fontSize: '9px', fontWeight: 700, lineHeight: 1,
+            minWidth: '16px', height: '16px', display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            padding: '0 3px', fontFamily: 'var(--mono-font)',
+          }}>
+            {unreadCount > 9 ? '9+' : unreadCount}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: '32px', right: 0, zIndex: 100,
+          width: '300px', background: 'var(--bg-card)',
+          border: '1px solid var(--border)', borderRadius: '8px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+          fontFamily: 'var(--mono-font)',
+        }}>
+          <div style={{
+            padding: '10px 14px', borderBottom: '1px solid var(--border)',
+            fontSize: '11px', fontWeight: 600, color: 'var(--text-faint)',
+            textTransform: 'uppercase', letterSpacing: '0.08em',
+          }}>
+            Notifications
+          </div>
+
+          {notifications.length === 0 ? (
+            <div style={{ padding: '20px 14px', fontSize: '12px', color: 'var(--text-faint)', textAlign: 'center' }}>
+              No new notifications
+            </div>
+          ) : (
+            <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+              {notifications.map(n => (
+                <div key={n.id} style={{
+                  padding: '10px 14px', borderBottom: '1px solid var(--border)',
+                  display: 'flex', gap: '10px', alignItems: 'flex-start',
+                }}>
+                  <span style={{ fontSize: '14px', marginTop: '1px' }}>
+                    {n.type === 'task_added' ? '◻' : '◈'}
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-primary)', marginBottom: '2px' }}>
+                      {n.title}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-faint)', lineHeight: '1.4',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {n.body}
+                    </div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-faint)', marginTop: '4px' }}>
+                      via Telegram · {formatTime(n.created_at)}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: string; email: string; avatar_url: string } }) {
+  const { token } = useAuth()
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [page, setPage] = useState<NavPage>('chat')
   const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([
@@ -168,7 +321,7 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
               </span>
               <div className="app__session-icons">
                 <button className="app__session-icon" title="Sync">☁</button>
-                <button className="app__session-icon" title="Notifications">🔔</button>
+                <NotificationBell token={token} />
               </div>
             </div>
             <Chat

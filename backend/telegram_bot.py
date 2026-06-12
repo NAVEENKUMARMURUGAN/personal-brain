@@ -340,6 +340,64 @@ def _format_response(result: dict) -> str:
     return answer
 
 
+# ── Notification helper ────────────────────────────────────────
+
+def _maybe_push_notification(result: dict, user_id: str, sender_name: str) -> None:
+    """
+    Push a web-app notification when Telegram adds a task or saves a memory.
+    Only fires for write operations — not for queries/reads.
+    """
+    rtype   = result.get("type", "text")
+    payload = result.get("payload", {})
+    answer  = result.get("answer", "")
+
+    if rtype == "task_added":
+        tasks = payload.get("tasks", [])
+        if tasks:
+            titles = ", ".join(t.get("content", "")[:40] for t in tasks[:3])
+            history.push_notification(
+                user_id=user_id,
+                type="task_added",
+                title=f"Task added via Telegram",
+                body=titles or answer[:80],
+            )
+        else:
+            # Fallback: answer text suggests a task was added
+            if any(kw in answer.lower() for kw in ["task added", "added task", "i've added", "i added"]):
+                history.push_notification(
+                    user_id=user_id,
+                    type="task_added",
+                    title="Task added via Telegram",
+                    body=answer[:80],
+                )
+
+    elif rtype in ("memory_saved", "save_info"):
+        history.push_notification(
+            user_id=user_id,
+            type="memory_saved",
+            title="Memory saved via Telegram",
+            body=answer[:80],
+        )
+
+    elif rtype == "text":
+        # Heuristic for plain-text responses that indicate a write happened
+        lower = answer.lower()
+        if any(kw in lower for kw in ["task added", "added task", "i've added", "i added", "added to your"]):
+            history.push_notification(
+                user_id=user_id,
+                type="task_added",
+                title="Task added via Telegram",
+                body=answer[:80],
+            )
+        elif any(kw in lower for kw in ["saved", "remembered", "noted", "i'll remember", "stored"]):
+            history.push_notification(
+                user_id=user_id,
+                type="memory_saved",
+                title="Memory saved via Telegram",
+                body=answer[:80],
+            )
+
+
 # ── Message processing ─────────────────────────────────────────
 
 async def handle_update(update: dict):
@@ -427,6 +485,9 @@ async def handle_update(update: dict):
         import uuid as _uuid
         history.save_message(str(_uuid.uuid4()), text, "user", user_id=user_id)
         history.save_message(str(_uuid.uuid4()), answer, "assistant", user_id=user_id)
+
+        # Push notification to web app for write operations
+        _maybe_push_notification(result, user_id, first_name or username or "Telegram")
 
         send_result = await send_message(chat_id, answer)
         logger.info("send_message result: %s", send_result.get("ok"))

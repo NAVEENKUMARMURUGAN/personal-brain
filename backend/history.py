@@ -36,6 +36,72 @@ def ensure_db():
             conn.execute("ALTER TABLE messages ADD COLUMN user_id TEXT")
         except Exception:
             pass  # column already exists
+
+        # Notifications table — for Telegram-originated events shown in the web app
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id         TEXT PRIMARY KEY,
+                user_id    TEXT NOT NULL,
+                type       TEXT NOT NULL,
+                title      TEXT NOT NULL,
+                body       TEXT NOT NULL,
+                source     TEXT NOT NULL DEFAULT 'telegram',
+                read       INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def push_notification(user_id: str, type: str, title: str, body: str, source: str = "telegram") -> None:
+    """Store a notification for the given user. Shown in the web app bell icon."""
+    import uuid
+    conn = get_conn()
+    try:
+        conn.execute(
+            """INSERT INTO notifications (id, user_id, type, title, body, source, read, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 0, ?)""",
+            (str(uuid.uuid4()), user_id, type, title, body, source,
+             datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_notifications(user_id: str, unread_only: bool = False, limit: int = 20) -> list:
+    """Return notifications for a user, newest first."""
+    conn = get_conn()
+    try:
+        if unread_only:
+            rows = conn.execute(
+                "SELECT * FROM notifications WHERE user_id = ? AND read = 0 ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                (user_id, limit)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def mark_notifications_read(user_id: str, notification_ids: Optional[list] = None) -> None:
+    """Mark notifications as read. If notification_ids is None, marks all."""
+    conn = get_conn()
+    try:
+        if notification_ids:
+            placeholders = ",".join("?" * len(notification_ids))
+            conn.execute(
+                f"UPDATE notifications SET read = 1 WHERE user_id = ? AND id IN ({placeholders})",
+                [user_id] + notification_ids,
+            )
+        else:
+            conn.execute("UPDATE notifications SET read = 1 WHERE user_id = ?", (user_id,))
         conn.commit()
     finally:
         conn.close()

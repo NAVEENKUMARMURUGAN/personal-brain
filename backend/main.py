@@ -295,6 +295,39 @@ async def telegram_webhook(request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.get("/notifications")
+async def get_notifications(
+    unread_only: bool = True,
+    limit: int = 20,
+    authorization: Optional[str] = Header(None),
+):
+    """Return notifications for the authenticated user."""
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    items = history.get_notifications(user_id, unread_only=unread_only, limit=limit)
+    return JSONResponse({"notifications": items, "unread_count": len([n for n in items if not n["read"]])})
+
+
+@app.post("/notifications/read")
+async def mark_notifications_read(
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """Mark notifications as read. Pass {ids: [...]} to mark specific ones, or empty body for all."""
+    user_id = auth.extract_user_id(authorization)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+    ids = body.get("ids", None)
+    history.mark_notifications_read(user_id, ids)
+    return JSONResponse({"ok": True})
+
+
 @app.get("/telegram/debug")
 async def telegram_debug():
     """Debug endpoint — shows token status, allowed IDs, and webhook info."""
