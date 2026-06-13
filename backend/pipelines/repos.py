@@ -128,9 +128,23 @@ async def _add_why_it_matters(repos: list[dict]) -> list[dict]:
     if not repos:
         return repos
 
+    # Build JSON outside f-string to avoid double-brace/dict-literal conflict
+    repos_json = json.dumps(
+        [
+            {
+                "full_name": r["full_name"],
+                "description": r["description"],
+                "language": r["language"],
+            }
+            for r in repos
+        ],
+        indent=2,
+    )
+    stack_str = ", ".join(USER_STACK_KEYWORDS)
+
     prompt = f"""Below are {len(repos)} trending AI/ML GitHub repositories.
 For each repo, write ONE punchy sentence (max 15 words) explaining why it matters to an AI engineer
-who builds RAG pipelines, agents, and LLM apps using this stack: {", ".join(USER_STACK_KEYWORDS)}.
+who builds RAG pipelines, agents, and LLM apps using this stack: {stack_str}.
 If a repo directly touches a stack item, mention it.
 
 Return ONLY valid JSON:
@@ -142,7 +156,7 @@ Return ONLY valid JSON:
 }}
 
 Repos:
-{json.dumps([{{"full_name": r["full_name"], "description": r["description"], "language": r["language"]}} for r in repos], indent=2)}
+{repos_json}
 """
 
     result = await call_claude_json(prompt, context="repos_why_it_matters")

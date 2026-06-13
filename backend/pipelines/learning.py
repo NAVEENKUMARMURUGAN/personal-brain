@@ -95,7 +95,10 @@ def _fetch_youtube_channels() -> list[dict]:
         return []
 
     for channel in channels:
+        # uploads_playlist_id = channel_id with "UC" → "UU"
         playlist_id = channel.get("uploads_playlist_id", "")
+        if not playlist_id and channel.get("channel_id", "").startswith("UC"):
+            playlist_id = "UU" + channel["channel_id"][2:]
         if not playlist_id:
             continue
         try:
@@ -218,6 +221,20 @@ async def _curate_with_claude(items: list[dict], today: str) -> Optional[list[di
     """Score and summarise learning content with Claude."""
     candidates = items[:30]
 
+    # Build the items JSON outside the f-string to avoid double-brace confusion
+    candidates_json = json.dumps(
+        [
+            {
+                "title": i["title"],
+                "source": i["source_name"],
+                "media_type": i["media_type"],
+                "snippet": i.get("summary_raw", "")[:200],
+            }
+            for i in candidates
+        ],
+        indent=2,
+    )
+
     prompt = f"""You curate learning content for an AI engineer building LLM apps (RAG, agents, evals).
 Today is {today}.
 
@@ -241,7 +258,7 @@ Return ONLY valid JSON:
 }}
 
 Items:
-{json.dumps([{{"title": i["title"], "source": i["source_name"], "media_type": i["media_type"], "snippet": i.get("summary_raw", "")[:200]}} for i in candidates], indent=2)}
+{candidates_json}
 """
 
     result = await call_claude_json(prompt, context="learning_curation", max_tokens=6144)

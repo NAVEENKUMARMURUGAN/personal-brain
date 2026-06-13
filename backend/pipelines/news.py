@@ -236,16 +236,16 @@ def _content_hash(item: dict) -> str:
 
 
 def _hash_dedup(items: list[dict]) -> list[dict]:
-    """Remove items already seen by content_hash; store new ones in feed_raw."""
+    """Remove exact duplicates within this batch. feed_raw is write-only for debugging;
+    we do NOT skip items that appeared in previous cycles — news recurs daily."""
     seen_hashes: set[str] = set()
     deduped: list[dict] = []
     for item in items:
         h = _content_hash(item)
         if h in seen_hashes:
-            continue
+            continue  # exact duplicate within this batch
         seen_hashes.add(h)
-        if dashboard_db.raw_hash_exists(h):
-            continue  # already processed in a previous cycle
+        # Store in feed_raw for debugging/replay (ignore duplicate key constraint)
         dashboard_db.insert_feed_raw(item.get("source_name", "unknown"), item, h)
         deduped.append(item)
     return deduped
@@ -324,6 +324,20 @@ async def _curate_with_claude(items: list[dict], today: str) -> Optional[list[di
     # Cap at 40 candidates to keep prompt size manageable
     candidates = items[:40]
 
+    # Build JSON outside f-string to avoid double-brace/dict-literal conflict
+    candidates_json = json.dumps(
+        [
+            {
+                "title": i["title"],
+                "source": i["source_name"],
+                "url": i["source_url"],
+                "snippet": i.get("summary_raw", "")[:200],
+            }
+            for i in candidates
+        ],
+        indent=2,
+    )
+
     prompt = f"""You curate AI/ML news for an AI engineer who builds production LLM apps
 (RAG pipelines, agents, evaluation frameworks, local/cloud LLM deployment).
 Today is {today}.
@@ -352,7 +366,7 @@ Return ONLY valid JSON:
 }}
 
 Items to evaluate:
-{json.dumps([{{"title": i["title"], "source": i["source_name"], "url": i["source_url"], "snippet": i.get("summary_raw", "")[:200]}} for i in candidates], indent=2)}
+{candidates_json}
 """
 
     result = await call_claude_json(prompt, context="news_curation", max_tokens=8192)
