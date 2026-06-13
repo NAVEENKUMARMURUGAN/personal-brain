@@ -37,11 +37,19 @@ MONITORED_LINES: set[str] = set(
 FIXTURE_MODE = os.getenv("FIXTURE_MODE", "").lower() in ("1", "true", "yes")
 
 
-async def run_pipeline() -> None:
-    """Fetch transit alerts and cache them in SQLite. Idempotent within a poll cycle."""
-    # Only run between 05:00 and 23:00 local time
+async def run_pipeline(force: bool = False) -> None:
+    """Fetch transit alerts and cache them in SQLite.
+
+    Args:
+        force: If True, bypass the 05:00-23:00 operating-hours guard.
+               Used by startup and login triggers so the cache is always
+               populated regardless of what time the server starts.
+    """
     local_hour = datetime.now().hour
-    if not FIXTURE_MODE and (local_hour < 5 or local_hour >= 23):
+    in_hours = 5 <= local_hour < 23
+
+    # Skip if outside operating hours — unless forced (startup / login trigger)
+    if not FIXTURE_MODE and not force and not in_hours:
         logger.debug("Transit pipeline: outside operating hours (%d:xx), skipping", local_hour)
         return
 

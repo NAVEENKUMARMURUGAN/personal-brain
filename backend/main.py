@@ -144,7 +144,7 @@ async def _run_startup_pipelines() -> None:
             logger.error("Pipeline error: %s — %s", name, e)
 
     await asyncio.gather(
-        _run("transit",  transit.run_pipeline),
+        _run("transit",  lambda: transit.run_pipeline(force=True)),
         _run("special",  special.run_pipeline),
         _run("repos",    repos.run_pipeline),
         _run("news",     news.run_pipeline),
