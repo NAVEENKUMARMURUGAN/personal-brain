@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 import anthropic
 import brain
 import tasks as tasks_module
+import dashboard_db
+import weather as weather_module
 from context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
@@ -158,6 +160,73 @@ TOOLS = [
 # ─────────────────────────────────────────────────────────────
 # System prompt
 # ─────────────────────────────────────────────────────────────
+# Dashboard context builder
+# ─────────────────────────────────────────────────────────────
+
+def _build_dashboard_context() -> str:
+    """Assemble a concise ENVIRONMENT block from cached dashboard data.
+
+    Reads only from SQLite caches — never calls external APIs.
+    Returns an empty string gracefully if any source fails.
+    """
+    lines: list[str] = []
+
+    # Weather (30-min cached from Open-Meteo)
+    try:
+        w = weather_module.get_weather()
+        if w:
+            rain_note = f", {w['rain_probability']}% rain chance" if w.get("rain_probability") else ""
+            lines.append(f"Weather: {w['temp_c']}°C{rain_note}. {w.get('description', '')}".strip())
+    except Exception:
+        pass
+
+    # Transit alerts
+    try:
+        alerts = dashboard_db.get_transit_alerts()
+        if alerts:
+            disrupted = [a for a in alerts if dict(a).get("severity") not in ("normal", None)]
+            if disrupted:
+                for a in disrupted:
+                    a = dict(a)
+                    lines.append(f"Transit {a['line']}: {a['title']} ({a['severity']} disruption)")
+            else:
+                monitored = sorted({dict(a)["line"] for a in alerts})
+                lines.append(f"Transit: Normal service on {', '.join(monitored)}.")
+    except Exception:
+        pass
+
+    # Special today (personal items first)
+    try:
+        from datetime import date
+        today_str = date.today().isoformat()
+        special_rows = dashboard_db.get_special_today(today_str)
+        if special_rows:
+            items_json = special_rows[0]["items_json"] if hasattr(special_rows[0], "__getitem__") else None
+            if items_json:
+                import json as _json
+                items = _json.loads(items_json) if isinstance(items_json, str) else items_json
+                for it in items[:3]:
+                    lines.append(f"Today: {it.get('emoji', '')} {it.get('label', '')} — {it.get('note', '')}".strip())
+    except Exception:
+        pass
+
+    # Top news headline
+    try:
+        from datetime import date
+        today_str = date.today().isoformat()
+        news = dashboard_db.get_feed_items("news", today_str)
+        if news:
+            top = dict(news[0])
+            lines.append(f"Top AI news: {top['title']} ({top.get('source_name', '')})")
+    except Exception:
+        pass
+
+    if not lines:
+        return "(weather and transit data not yet available)"
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
 You are Personal Brain — a personal knowledge and task management assistant.
@@ -167,6 +236,9 @@ You have access to tools to:
 2. Manage their daily tasks (add, complete, carry forward, review)
 
 TODAY: {today}
+
+ENVIRONMENT (weather, transit, events — already fetched, use directly, no tools needed):
+{dashboard_context}
 
 EXISTING KNOWLEDGE CATEGORIES:
 {categories}
@@ -196,6 +268,14 @@ FILTERED / SPECIFIC TASK QUESTIONS — answer from context, NO tools needed:
   Do NOT call get_tasks. Do NOT call search_knowledge. Just answer from the list above.
   Example: "Yes, you have: [relevant task]" or "No tasks related to X found."
 
+PLAN MY DAY — when the user asks to plan their day:
+- You already have everything you need: PENDING TASKS TODAY, ENVIRONMENT above.
+- Do NOT ask the user to provide weather, transit, or tasks — you have them.
+- Structure a realistic time-blocked plan: morning (before 9am), morning work block,
+  lunch break, afternoon block, evening. Factor in weather and transit warnings.
+- Prioritise overdue tasks first, then due-today, then inbox.
+- Keep it concise — one short paragraph or a simple time-blocked list.
+
 CRITICAL rules:
 - get_tasks returns the FULL list — only call it when the user wants to see everything.
 - Filtered task questions: scan PENDING TASKS TODAY above and answer in plain text.
@@ -203,6 +283,7 @@ CRITICAL rules:
 - "show categories" / "show my brain" means get_categories, not get_tasks.
 - Be concise after tool calls — don't re-list what the tool already returned.
 - Never save a user's question or command as knowledge.
+- Never ask the user to provide weather, transport, or calendar data — use ENVIRONMENT above.
 """
 
 # ─────────────────────────────────────────────────────────────
@@ -401,6 +482,7 @@ async def process_message(ctx: ContextManager, user_id: str) -> dict:
 
     system = SYSTEM_PROMPT.format(
         today=today,
+        dashboard_context=_build_dashboard_context(),
         categories="\n".join(f"- {c['name']}" for c in ctx.categories) or "(none yet)",
         pending_tasks="\n".join(f"- [{t['id']}] {t['content']}" for t in ctx.pending_tasks) or "(none)",
         relevant_memories="\n".join(f"- [{m['category']}] {m['content']}" for m in ctx.relevant_memories) or "(none)",
