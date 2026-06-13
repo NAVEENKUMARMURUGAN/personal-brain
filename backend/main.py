@@ -119,12 +119,34 @@ async def startup():
     _register_dashboard_pipelines()
     if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("BACKEND_URL"):
         await telegram_bot.set_webhook(BACKEND_URL)
+    # Run all pipelines once at startup so the dashboard is populated immediately.
+    # Each pipeline is idempotent — if today's cycle already exists it exits in < 1ms.
+    asyncio.create_task(_run_startup_pipelines())
 
 
 # ── Routes ─────────────────────────────────────────────────────
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+
+async def _run_startup_pipelines() -> None:
+    """Run all dashboard pipelines once at startup (background task).
+    Each pipeline checks its own cycle_date guard — safe to run on every restart."""
+    from pipelines import news, learning, repos, special, transit
+    pipeline_jobs = [
+        ("transit",  transit.run_pipeline),
+        ("special",  special.run_pipeline),
+        ("repos",    repos.run_pipeline),
+        ("news",     news.run_pipeline),
+        ("learning", learning.run_pipeline),
+    ]
+    for name, fn in pipeline_jobs:
+        try:
+            logger.info("Startup pipeline: running %s", name)
+            await fn()
+        except Exception as e:
+            logger.error("Startup pipeline %s failed: %s", name, e)
 
 
 def _register_dashboard_pipelines() -> None:
