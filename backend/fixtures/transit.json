@@ -1,0 +1,18 @@
+[
+  {
+    "line": "T1",
+    "severity": "normal",
+    "title": "Normal Service",
+    "detail": null,
+    "starts_at": null,
+    "ends_at": null
+  },
+  {
+    "line": "T2",
+    "severity": "minor",
+    "title": "Minor delays between Central and Redfern",
+    "detail": "Trains on the T2 Inner West & Leppington Line are running up to 5 minutes late between Central and Redfern due to signal maintenance. Allow extra travel time.",
+    "starts_at": "2026-06-13T06:00:00Z",
+    "ends_at": "2026-06-13T10:00:00Z"
+  }
+]

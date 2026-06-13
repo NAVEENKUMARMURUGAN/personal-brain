@@ -1,0 +1,92 @@
+# sources.yaml — RSS/blog feed sources for the AI News and Learning pipelines.
+#
+# Fields:
+#   url:      RSS or Atom feed URL
+#   name:     Display name shown in the dashboard
+#   kind:     "news" | "learning" | "both"
+#   priority: 1 (highest) – 5 (lowest) — affects ranking tie-breaking
+#   learning: true  — mark as a learning source (used by P2 pipeline filter)
+
+feeds:
+  # ── AI Lab blogs ──────────────────────────────────────────────
+  - url: https://www.anthropic.com/rss.xml
+    name: Anthropic Blog
+    kind: news
+    priority: 1
+
+  - url: https://openai.com/blog/rss.xml
+    name: OpenAI Blog
+    kind: news
+    priority: 1
+
+  - url: https://mistral.ai/news/rss.xml
+    name: Mistral AI
+    kind: news
+    priority: 2
+
+  - url: https://deepmind.google/discover/blog/rss.xml
+    name: Google DeepMind
+    kind: news
+    priority: 1
+
+  - url: https://huggingface.co/blog/feed.xml
+    name: Hugging Face Blog
+    kind: both
+    priority: 2
+
+  # ── Practitioner newsletters / podcasts ───────────────────────
+  - url: https://feeds.transistor.fm/latent-space
+    name: Latent Space
+    kind: both
+    priority: 2
+
+  - url: https://www.interconnects.ai/feed
+    name: Interconnects
+    kind: both
+    priority: 2
+
+  # ── Community / practitioner writing ─────────────────────────
+  - url: https://towardsdatascience.com/feed
+    name: Towards Data Science
+    kind: both
+    priority: 3
+
+  - url: https://dev.to/feed/tag/llm
+    name: dev.to / LLM
+    kind: both
+    priority: 3
+
+  - url: https://dev.to/feed/tag/machinelearning
+    name: dev.to / ML
+    kind: both
+    priority: 4
+
+  # ── Research / arXiv aggregators ──────────────────────────────
+  - url: https://arxiv.org/rss/cs.CL
+    name: arXiv cs.CL
+    kind: news
+    priority: 2
+
+  - url: https://arxiv.org/rss/cs.AI
+    name: arXiv cs.AI
+    kind: news
+    priority: 2
+
+  # ── Learning-focused sources ──────────────────────────────────
+  - url: https://lilianweng.github.io/index.xml
+    name: Lilian Weng's Blog
+    kind: learning
+    priority: 1
+    learning: true
+
+  - url: https://eugeneyan.com/rss/
+    name: Eugene Yan
+    kind: learning
+    priority: 1
+    learning: true
+
+  - url: https://www.newsletter.swirlai.com/feed
+    name: Swirl AI
+    kind: learning
+    priority: 2
+    learning: true

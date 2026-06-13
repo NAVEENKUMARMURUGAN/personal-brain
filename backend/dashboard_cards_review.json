@@ -1,0 +1,142 @@
+[
+  {
+    "term": "Retrieval-Augmented Generation (RAG)",
+    "explanation": "A pattern that grounds LLM responses in retrieved documents: embed the query, fetch top-k passages from a vector store, then pass them as context to the LLM. The model reasons over real data instead of relying solely on training-time knowledge.",
+    "usage_line": "Q&A over private docs, customer support bots, knowledge base chat",
+    "code_example": "hits = qdrant.search(query_vector=embed(q), limit=5)\ncontext = '\\n'.join(h.payload['content'] for h in hits)\nanswer = llm(f'Context:\\n{context}\\n\\nQuestion: {q}')",
+    "pathway_node": "RAG"
+  },
+  {
+    "term": "Vector Embedding",
+    "explanation": "A fixed-length list of floating-point numbers that encodes the semantic meaning of text, images, or other data. Texts with similar meanings cluster close together in this high-dimensional space, enabling semantic search and similarity comparisons.",
+    "usage_line": "Semantic search, duplicate detection, RAG retrieval, clustering",
+    "code_example": "from openai import OpenAI\nvec = OpenAI().embeddings.create(\n    model='text-embedding-3-small', input='hello world'\n).data[0].embedding  # list of 1536 floats",
+    "pathway_node": "embeddings"
+  },
+  {
+    "term": "HNSW (Hierarchical Navigable Small World)",
+    "explanation": "The graph-based index algorithm used by most modern vector databases. It builds a multi-layer graph where each node links to its approximate nearest neighbours. Queries traverse from sparse top layers to dense bottom layers, achieving sub-linear search time.",
+    "usage_line": "Qdrant, Weaviate, Milvus, pgvector all use HNSW internally",
+    "code_example": "# Qdrant HNSW tuning\nclient.create_collection(\n    'my_col',\n    vectors_config=VectorParams(size=1536, distance=Distance.COSINE),\n    hnsw_config=HnswConfigDiff(m=16, ef_construct=200)\n)",
+    "pathway_node": "RAG"
+  },
+  {
+    "term": "Cosine Similarity",
+    "explanation": "A measure of the angle between two vectors, regardless of their magnitude. Returns a value from -1 (opposite) to 1 (identical). Used in vector search to rank document chunks by semantic closeness to a query embedding.",
+    "usage_line": "Ranking retrieved chunks, deduplication, clustering similar memories",
+    "code_example": "import numpy as np\n\ndef cosine_sim(a, b):\n    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))",
+    "pathway_node": "embeddings"
+  },
+  {
+    "term": "Chunking Strategy",
+    "explanation": "How you split long documents before embedding them. Common strategies: fixed-size (split every N tokens), sentence-based, recursive (split on paragraphs, then sentences, then words), and semantic (split at topic boundaries). Chunk size is a key RAG quality lever.",
+    "usage_line": "Any RAG pipeline \u2014 the chunking strategy directly affects retrieval recall",
+    "code_example": "# Recursive character text splitter\nfrom langchain.text_splitter import RecursiveCharacterTextSplitter\nsplitter = RecursiveCharacterTextSplitter(\n    chunk_size=512, chunk_overlap=64\n)\nchunks = splitter.split_text(document)",
+    "pathway_node": "RAG"
+  },
+  {
+    "term": "Prompt Engineering",
+    "explanation": "The practice of crafting LLM input text to reliably elicit the desired output. Key techniques: role assignment ('You are a senior engineer...'), chain-of-thought ('Think step by step...'), few-shot examples, output format constraints, and self-consistency sampling.",
+    "usage_line": "Every LLM call benefits from deliberate prompt design",
+    "code_example": "system = (\n    'You are a concise JSON-only responder. '\n    'Reply with ONLY valid JSON, no markdown.'\n)\nresponse = claude.messages.create(\n    model='claude-sonnet-4-20250514',\n    system=system,\n    messages=[{'role': 'user', 'content': prompt}]\n)",
+    "pathway_node": "fundamentals"
+  },
+  {
+    "term": "Tool Use / Function Calling",
+    "explanation": "A capability where LLMs can request structured function calls instead of plain text. The model outputs a JSON object naming a function and its arguments; your code executes it and feeds the result back. This is the foundation of agentic workflows.",
+    "usage_line": "Agents that can search, write files, call APIs, or query databases",
+    "code_example": "tools = [{\n    'name': 'search_web',\n    'description': 'Search the internet for current info',\n    'input_schema': {'type': 'object', 'properties': {'query': {'type': 'string'}}}\n}]\nresponse = client.messages.create(model=..., tools=tools, messages=[...])",
+    "pathway_node": "agents"
+  },
+  {
+    "term": "ReAct (Reason + Act)",
+    "explanation": "An agent prompting pattern that interleaves reasoning traces with actions. The LLM writes a Thought (what it believes), then an Action (what tool to call), observes the result, and repeats. This chain makes agent decision-making transparent and debuggable.",
+    "usage_line": "Any tool-using agent that needs to decompose multi-step problems",
+    "code_example": "# ReAct trace in a prompt\n'''\nThought: I need to find the current weather in Sydney.\nAction: get_weather({\"city\": \"Sydney\"})\nObservation: 18\u00b0C, partly cloudy.\nThought: Now I have the weather, I can answer.\nAnswer: It is currently 18\u00b0C and partly cloudy in Sydney.\n'''",
+    "pathway_node": "agents"
+  },
+  {
+    "term": "Hallucination",
+    "explanation": "When a language model confidently generates factually incorrect, fabricated, or contradictory information. Hallucinations occur because LLMs are trained to produce fluent, plausible text, not to verify factual claims. RAG, citations, and grounding are the main mitigations.",
+    "usage_line": "Primary failure mode in production LLM apps; must be tested for",
+    "code_example": "# Grounding check in your prompt\nsystem = (\n    'Answer ONLY from the context provided. '\n    'If the answer is not in the context, say: '\n    '\"I don\\'t have enough information.\"'\n)",
+    "pathway_node": "fundamentals"
+  },
+  {
+    "term": "Context Window",
+    "explanation": "The maximum number of tokens (words/subwords) an LLM can process in a single call \u2014 both the prompt input and generated output combined. Beyond this limit, the model cannot 'see' earlier text. Modern models range from 8k to 1M+ tokens.",
+    "usage_line": "Determines how much document context you can pass in a RAG call",
+    "code_example": "# Claude Sonnet 4: 200k token context\n# At ~750 words/1k tokens, that's ~150k words\n# Cost: input tokens are billed separately from output\n\n# Rough RAG budget:\n# System prompt: 500 tokens\n# Retrieved chunks (5 x 512): 2560 tokens\n# User question: 50 tokens\n# Total: ~3110 of 200k used",
+    "pathway_node": "fundamentals"
+  },
+  {
+    "term": "Token",
+    "explanation": "The basic unit of text that LLMs process. Roughly 1 token \u2248 0.75 English words. Tokenisers split text into subword pieces (e.g. 'unbelievable' \u2192 ['un', 'believ', 'able']). All LLM pricing, context limits, and latency estimates are measured in tokens.",
+    "usage_line": "Estimating costs, checking if a document fits in context, measuring throughput",
+    "code_example": "import tiktoken\nenc = tiktoken.encoding_for_model('gpt-4o')\ntokens = enc.encode('Hello, world!')\nprint(len(tokens))  # \u2192 4",
+    "pathway_node": "fundamentals"
+  },
+  {
+    "term": "BM25",
+    "explanation": "A classical sparse retrieval algorithm (Best Match 25) that scores documents by keyword frequency, adjusted for document length and corpus-wide term rarity (IDF). Outperforms dense embedding search on exact-keyword queries and never needs a GPU.",
+    "usage_line": "Hybrid search: combine with dense vectors for the best of both worlds",
+    "code_example": "from rank_bm25 import BM25Okapi\n\ncorpus = [doc.split() for doc in documents]\nbm25 = BM25Okapi(corpus)\nscores = bm25.get_scores(query.split())\ntop_idx = scores.argsort()[::-1][:5]",
+    "pathway_node": "RAG"
+  },
+  {
+    "term": "Hybrid Search",
+    "explanation": "Combining sparse (BM25/keyword) and dense (vector/semantic) retrieval results. Reciprocal Rank Fusion (RRF) or score normalisation merges the two ranked lists. Consistently outperforms either method alone across diverse query types.",
+    "usage_line": "Production RAG where queries mix keywords and semantic intent",
+    "code_example": "# Reciprocal Rank Fusion (RRF)\ndef rrf(rankings: list[list], k=60):\n    scores = {}\n    for ranked_list in rankings:\n        for rank, doc_id in enumerate(ranked_list):\n            scores[doc_id] = scores.get(doc_id, 0) + 1 / (k + rank + 1)\n    return sorted(scores, key=scores.get, reverse=True)",
+    "pathway_node": "RAG"
+  },
+  {
+    "term": "Re-ranking",
+    "explanation": "A second-pass scoring step applied to an initial set of retrieved documents. A cross-encoder model reads both the query and each candidate together (vs. embedding them separately), giving a more accurate relevance score at higher compute cost.",
+    "usage_line": "Improving RAG precision after initial vector retrieval",
+    "code_example": "from sentence_transformers import CrossEncoder\nreranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')\npairs = [(query, doc) for doc in candidates]\nscores = reranker.predict(pairs)\ntop = sorted(zip(scores, candidates), reverse=True)[:5]",
+    "pathway_node": "RAG"
+  },
+  {
+    "term": "LLM-as-Judge",
+    "explanation": "Using a powerful LLM to evaluate another LLM's outputs instead of (or alongside) human annotation. The judge receives the question, the candidate answer, and a rubric; it outputs a score and optionally a reasoning trace. Scales evaluation cheaply.",
+    "usage_line": "Automated eval pipelines, A/B testing prompts, regression testing",
+    "code_example": "rubric = '''\nScore 1-5:\n5: Fully correct, well-grounded, concise\n3: Partially correct or too verbose\n1: Wrong or hallucinated\n\nFirst write REASONING: <why>\nThen write SCORE: <1-5>\n'''\nprompt = f'Question: {q}\\nAnswer: {a}\\n\\n{rubric}'",
+    "pathway_node": "evals"
+  },
+  {
+    "term": "RAGAS",
+    "explanation": "An open-source framework for RAG evaluation. Its four core metrics: Faithfulness (does the answer stay within the retrieved context?), Answer Relevancy (does the answer address the question?), Context Recall, and Context Precision. All computed automatically using an LLM.",
+    "usage_line": "Benchmarking RAG pipelines; catching retrieval degradation in CI",
+    "code_example": "from ragas import evaluate\nfrom ragas.metrics import faithfulness, answer_relevancy\n\nresult = evaluate(\n    dataset,  # HuggingFace Dataset with question/answer/contexts/ground_truth\n    metrics=[faithfulness, answer_relevancy]\n)\nprint(result['faithfulness'])  # 0.0 \u2013 1.0",
+    "pathway_node": "evals"
+  },
+  {
+    "term": "Agent Memory",
+    "explanation": "How agents persist information across turns and tasks. Four types: in-context (within current prompt), external (database lookup), episodic (past conversation logs), and semantic (vector store of distilled facts). Most production agents combine all four.",
+    "usage_line": "Long-horizon task agents, personalised assistants, multi-session bots",
+    "code_example": "# Semantic memory write (this app pattern)\nbrain.chunk_and_save(\n    text='User prefers dark mode and Python over JS.',\n    category='Preferences',\n    user_id=user_id\n)\n# Retrieval at query time happens in ContextManager.build()",
+    "pathway_node": "agents"
+  },
+  {
+    "term": "Structured Output",
+    "explanation": "Constraining an LLM to produce output in a specific format (JSON, XML, a Pydantic model). Achieved via constrained decoding (grammar-based), JSON mode, or strong prompting ('ONLY output valid JSON'). Eliminates fragile regex parsing of free-form responses.",
+    "usage_line": "Any pipeline step that needs to parse LLM output programmatically",
+    "code_example": "# Anthropic: prefill to lock in JSON\nresponse = client.messages.create(\n    messages=[\n        {'role': 'user', 'content': prompt},\n        {'role': 'assistant', 'content': '{'}\n    ]\n)\nraw = '{' + response.content[0].text\ndata = json.loads(raw)",
+    "pathway_node": "fundamentals"
+  },
+  {
+    "term": "Semantic Cache",
+    "explanation": "A cache that stores LLM responses and retrieves them for semantically similar future queries \u2014 not just exact duplicates. A new query is embedded; if its vector is within threshold of a cached query, the cached response is returned without calling the LLM.",
+    "usage_line": "Cutting LLM costs in high-volume apps with recurring question patterns",
+    "code_example": "CACHE_THRESHOLD = 0.92\n\ndef semantic_cache_lookup(query_vec, cache_store):\n    results = cache_store.search(query_vec, limit=1, score_threshold=CACHE_THRESHOLD)\n    if results:\n        return results[0].payload['response']\n    return None",
+    "pathway_node": "production"
+  },
+  {
+    "term": "Quantisation",
+    "explanation": "Reducing model weight precision from float32 to float16, int8, or int4. Trades a small accuracy loss for dramatic reductions in memory (2-8x) and inference speed. Essential for running 7B+ models on consumer hardware or reducing cloud GPU costs.",
+    "usage_line": "Running models locally (llama.cpp GGUF), reducing vLLM GPU memory",
+    "code_example": "# Load a 4-bit quantised model with transformers\nfrom transformers import AutoModelForCausalLM\nmodel = AutoModelForCausalLM.from_pretrained(\n    'meta-llama/Llama-3-8B',\n    load_in_4bit=True,          # bitsandbytes 4-bit\n    device_map='auto'\n)",
+    "pathway_node": "production"
+  }
+]

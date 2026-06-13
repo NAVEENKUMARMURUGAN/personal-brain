@@ -1,0 +1,56 @@
+[
+  {
+    "full_name": "qdrant/qdrant",
+    "description": "Vector Database for the next generation of AI applications. Also available in the cloud.",
+    "language": "Rust",
+    "stars": 21800,
+    "stars_gained_7d": 1240,
+    "why_it_matters": "Powers the vector search layer in this very app — keep an eye on new quantization features.",
+    "cycle_date": "2026-06-13"
+  },
+  {
+    "full_name": "langchain-ai/langgraph",
+    "description": "Build resilient language agents as graphs.",
+    "language": "Python",
+    "stars": 13500,
+    "stars_gained_7d": 980,
+    "why_it_matters": "The go-to framework for stateful multi-agent workflows; native support for human-in-the-loop approval steps.",
+    "cycle_date": "2026-06-13"
+  },
+  {
+    "full_name": "ollama/ollama",
+    "description": "Get up and running with Llama 3, Mistral, Gemma, and other large language models locally.",
+    "language": "Go",
+    "stars": 88400,
+    "stars_gained_7d": 2100,
+    "why_it_matters": "OpenAI-compatible local serving with Metal acceleration — plug it into your FastAPI backend as a drop-in Claude alternative.",
+    "cycle_date": "2026-06-13"
+  },
+  {
+    "full_name": "BerriAI/litellm",
+    "description": "Call all LLM APIs using the OpenAI format. Use Bedrock, Azure, OpenAI, Cohere, Anthropic, Ollama, Sagemaker, HuggingFace, Replicate.",
+    "language": "Python",
+    "stars": 14200,
+    "stars_gained_7d": 760,
+    "why_it_matters": "Unified routing layer so you can swap between Claude Sonnet and local Ollama without changing your app code.",
+    "cycle_date": "2026-06-13"
+  },
+  {
+    "full_name": "vllm-project/vllm",
+    "description": "A high-throughput and memory-efficient inference and serving engine for LLMs.",
+    "language": "Python",
+    "stars": 31100,
+    "stars_gained_7d": 890,
+    "why_it_matters": "Best-in-class GPU throughput for self-hosted models; PagedAttention cuts memory waste by 40% vs. naive serving.",
+    "cycle_date": "2026-06-13"
+  },
+  {
+    "full_name": "microsoft/graphrag",
+    "description": "A modular graph-based Retrieval-Augmented Generation (RAG) system.",
+    "language": "Python",
+    "stars": 19800,
+    "stars_gained_7d": 650,
+    "why_it_matters": "Graph-structured knowledge beats flat vector search for multi-hop reasoning; integrates cleanly with existing Qdrant pipelines.",
+    "cycle_date": "2026-06-13"
+  }
+]

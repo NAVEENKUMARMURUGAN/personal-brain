@@ -16,9 +16,11 @@ type RecordingState = 'idle' | 'recording' | 'transcribing'
 interface ChatProps {
   onDrillCategory: (category: string) => void
   onAgentAction?: (action: string, detail?: string) => void
+  initialMessage?: string
+  onInitialMessageConsumed?: () => void
 }
 
-export default function Chat({ onDrillCategory, onAgentAction }: ChatProps) {
+export default function Chat({ onDrillCategory, onAgentAction, initialMessage, onInitialMessageConsumed }: ChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -34,6 +36,7 @@ export default function Chat({ onDrillCategory, onAgentAction }: ChatProps) {
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const initialMessageHandled = useRef(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const apolloClient = useApolloClient()
@@ -76,6 +79,16 @@ export default function Chat({ onDrillCategory, onAgentAction }: ChatProps) {
   useEffect(() => {
     scrollToBottom()
   }, [messages, scrollToBottom])
+
+  // Pre-fill input when navigating from dashboard
+  useEffect(() => {
+    if (initialMessage && !initialMessageHandled.current) {
+      initialMessageHandled.current = true
+      setInput(initialMessage)
+      setTimeout(() => textareaRef.current?.focus(), 50)
+      onInitialMessageConsumed?.()
+    }
+  }, [initialMessage, onInitialMessageConsumed])
 
   const handleDrill = useCallback(async (category: string) => {
     try {

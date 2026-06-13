@@ -2,7 +2,7 @@ import json
 import uuid
 import logging
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -10,6 +10,8 @@ from fastapi.responses import JSONResponse
 import brain
 import tasks as tasks_module
 import history
+import dashboard_db
+import weather as weather_module
 import claude
 import auth
 from context_manager import ContextManager
@@ -100,6 +102,166 @@ type PageInfo {
   hasNextPage: Boolean
   cursor: String
 }
+
+# ── Dashboard ──────────────────────────────────────────────────
+
+extend type Query {
+  dashboard: Dashboard!
+}
+
+extend type Mutation {
+  saveToBrain(feedItemId: ID!): Bookmark!
+  reviewLearningCard(cardId: ID!, result: ReviewResult!): LearningCard!
+  triageInboxItem(itemId: ID!, action: TriageAction!): Task!
+  refreshBriefing: Briefing!
+}
+
+type Dashboard {
+  briefing: Briefing
+  weather: Weather
+  transit: TransitStatus!
+  specialToday: [SpecialItem!]!
+  today: TodayPanel!
+  news: FeedSection!
+  learningPicks: FeedSection!
+  localToday: LocalSection!
+  trendingRepos: [Repo!]!
+  conceptOfTheDay: LearningCard
+  weeklyStats: WeeklyStats!
+}
+
+type Briefing {
+  id: String
+  text: String!
+  generatedAt: String!
+  cycleDate: String!
+}
+
+type Weather {
+  tempC: Float!
+  rainProbability: Int!
+  condition: String!
+  hourly: [HourlyWeather!]!
+}
+
+type HourlyWeather {
+  hour: String!
+  tempC: Float!
+  rainMm: Float!
+}
+
+type TransitStatus {
+  overallSeverity: String!
+  alerts: [TransitAlert!]!
+}
+
+type TransitAlert {
+  id: String!
+  line: String!
+  severity: String!
+  title: String!
+  detail: String
+}
+
+type SpecialItem {
+  emoji: String!
+  label: String!
+  kind: String!
+  note: String
+}
+
+type TodayPanel {
+  due: [Task!]!
+  overdue: [OverdueTask!]!
+  inbox: [InboxItem!]!
+}
+
+type OverdueTask {
+  id: String!
+  content: String!
+  createdDate: String!
+  daysOverdue: Int!
+}
+
+type InboxItem {
+  id: String!
+  content: String!
+  createdDate: String!
+  source: String!
+}
+
+type FeedSection {
+  refreshedAt: String
+  items: [FeedItem!]!
+}
+
+type FeedItem {
+  id: String!
+  rank: Int!
+  title: String!
+  sourceName: String!
+  tag: String!
+  summaryShort: String!
+  summaryDetail: String!
+  sourceUrl: String!
+  mediaType: String!
+  durationMin: Int
+  bookmarked: Boolean!
+}
+
+type LocalSection {
+  alerts: [TransitAlert!]!
+  advisories: [WeatherAdvisory!]!
+}
+
+type WeatherAdvisory {
+  title: String!
+  detail: String!
+}
+
+type Repo {
+  fullName: String!
+  description: String!
+  language: String
+  starsGained7d: Int!
+  whyItMatters: String!
+}
+
+type LearningCard {
+  id: String!
+  term: String!
+  explanation: String!
+  usageLine: String
+  codeExample: String
+  pathwayNode: String!
+  ease: Float!
+  timesSeen: Int!
+  mastered: Boolean!
+}
+
+type WeeklyStats {
+  tasksDone7d: Int!
+  articlesSaved: Int!
+  cardsMastered: Int!
+  dayStreak: Int!
+}
+
+type Bookmark {
+  id: String!
+  feedItemId: String!
+  createdAt: String!
+}
+
+enum ReviewResult {
+  knew_it
+  show_again
+}
+
+enum TriageAction {
+  today
+  later
+  archive
+}
 """
 
 
@@ -179,6 +341,18 @@ async def handle(request: Request) -> JSONResponse:
             result = await _handle_categories(user_id)
         elif op_type == "query" and field == "memories":
             result = await _handle_memories(variables, user_id)
+        # ── Dashboard queries ──────────────────────────────────
+        elif op_type == "query" and field == "dashboard":
+            result = await _handle_dashboard(user_id)
+        # ── Dashboard mutations ────────────────────────────────
+        elif op_type == "mutation" and field == "saveToBrain":
+            result = await _handle_save_to_brain(variables, user_id)
+        elif op_type == "mutation" and field == "reviewLearningCard":
+            result = await _handle_review_learning_card(variables, user_id)
+        elif op_type == "mutation" and field == "triageInboxItem":
+            result = await _handle_triage_inbox_item(variables, user_id)
+        elif op_type == "mutation" and field == "refreshBriefing":
+            result = await _handle_refresh_briefing(user_id)
         else:
             logger.error("Unknown operation: op=%s field=%s query=%r", op_type, field, query)
             return JSONResponse(_err(f"Unknown operation: {field}"), status_code=400)
@@ -306,3 +480,359 @@ async def _handle_memories(variables: dict, user_id: str) -> dict:
         }}
 
     return _ok({"memories": page})
+
+
+# ══════════════════════════════════════════════════════════════
+# Dashboard handlers
+# ══════════════════════════════════════════════════════════════
+
+async def _handle_dashboard(user_id: str) -> dict:
+    """Assemble the full Dashboard payload. Each sub-section fails independently."""
+    today = date.today().isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    dashboard: dict[str, Any] = {}
+
+    # ── Briefing ──────────────────────────────────────────────
+    try:
+        from pipelines.briefing import generate_briefing
+        briefing = await generate_briefing(user_id)
+        if briefing:
+            dashboard["briefing"] = {
+                "id": briefing.get("id"),
+                "text": briefing.get("text", ""),
+                "generatedAt": briefing.get("generated_at", now_iso),
+                "cycleDate": briefing.get("cycle_date", today),
+            }
+        else:
+            dashboard["briefing"] = None
+    except Exception as e:
+        logger.error("Dashboard briefing error: %s", e)
+        dashboard["briefing"] = None
+
+    # ── Weather ───────────────────────────────────────────────
+    try:
+        w = weather_module.get_weather()
+        dashboard["weather"] = {
+            "tempC": w.get("tempC", 0.0),
+            "rainProbability": w.get("rainProbability", 0),
+            "condition": w.get("condition", ""),
+            "hourly": w.get("hourly", []),
+        }
+    except Exception as e:
+        logger.error("Dashboard weather error: %s", e)
+        dashboard["weather"] = None
+
+    # ── Transit ───────────────────────────────────────────────
+    try:
+        alerts = dashboard_db.get_transit_alerts()
+        disrupted = [a for a in alerts if a.get("severity") not in ("normal",)]
+        overall_severity = "major" if any(a["severity"] == "major" for a in disrupted) \
+            else "minor" if disrupted else "normal"
+        dashboard["transit"] = {
+            "overallSeverity": overall_severity,
+            "alerts": [
+                {
+                    "id": a.get("id", ""),
+                    "line": a.get("line", ""),
+                    "severity": a.get("severity", "normal"),
+                    "title": a.get("title", ""),
+                    "detail": a.get("detail"),
+                }
+                for a in alerts
+            ],
+        }
+    except Exception as e:
+        logger.error("Dashboard transit error: %s", e)
+        dashboard["transit"] = {"overallSeverity": "normal", "alerts": []}
+
+    # ── Special Today ─────────────────────────────────────────
+    try:
+        # Merge user personal dates first, then global picks
+        month_day = f"{datetime.now().month:02d}-{datetime.now().day:02d}"
+        personal = dashboard_db.get_user_special_dates(user_id, month_day)
+        global_items = dashboard_db.get_special_today(today) or []
+        personal_items = [
+            {"emoji": "🎂", "label": row.get("label", ""), "kind": "personal",
+             "note": row.get("note")}
+            for row in personal
+        ]
+        combined = (personal_items + global_items)[:5]
+        dashboard["specialToday"] = combined
+    except Exception as e:
+        logger.error("Dashboard specialToday error: %s", e)
+        dashboard["specialToday"] = []
+
+    # ── Today Panel (tasks) ───────────────────────────────────
+    try:
+        task_page = tasks_module.get_tasks(today, user_id)
+        pending = task_page.get("pending", [])
+        due_today = [t for t in pending if t.get("createdDate") == today or not t.get("createdDate")]
+        overdue_tasks = []
+        for t in pending:
+            created = t.get("createdDate", today)
+            if created and created < today:
+                from datetime import date as date_type
+                try:
+                    delta = (date.fromisoformat(today) - date.fromisoformat(created)).days
+                except Exception:
+                    delta = 0
+                overdue_tasks.append({
+                    "id": t["id"],
+                    "content": t["content"],
+                    "createdDate": created,
+                    "daysOverdue": delta,
+                })
+        # Inbox: tasks with status='inbox'
+        inbox_tasks = [t for t in pending if t.get("status") == "inbox"]
+        dashboard["today"] = {
+            "due": due_today,
+            "overdue": overdue_tasks,
+            "inbox": [
+                {"id": t["id"], "content": t["content"],
+                 "createdDate": t.get("createdDate", today), "source": "chat"}
+                for t in inbox_tasks
+            ],
+        }
+    except Exception as e:
+        logger.error("Dashboard today error: %s", e)
+        dashboard["today"] = {"due": [], "overdue": [], "inbox": []}
+
+    # ── News ──────────────────────────────────────────────────
+    try:
+        bookmarked_ids = dashboard_db.get_bookmarked_item_ids(user_id)
+        news_items = dashboard_db.get_feed_items("news", today)
+        # Fall back to most recent cycle if today has no items yet
+        if not news_items:
+            last = dashboard_db.get_latest_feed_cycle("news")
+            if last:
+                news_items = dashboard_db.get_feed_items("news", last)
+        refreshed_at = news_items[0].get("created_at") if news_items else None
+        dashboard["news"] = {
+            "refreshedAt": refreshed_at,
+            "items": [_serialize_feed_item(item, bookmarked_ids) for item in news_items],
+        }
+    except Exception as e:
+        logger.error("Dashboard news error: %s", e)
+        dashboard["news"] = {"refreshedAt": None, "items": []}
+
+    # ── Learning Picks ────────────────────────────────────────
+    try:
+        bookmarked_ids = dashboard_db.get_bookmarked_item_ids(user_id)
+        learn_items = dashboard_db.get_feed_items("learning", today)
+        if not learn_items:
+            last = dashboard_db.get_latest_feed_cycle("learning")
+            if last:
+                learn_items = dashboard_db.get_feed_items("learning", last)
+        refreshed_at = learn_items[0].get("created_at") if learn_items else None
+        dashboard["learningPicks"] = {
+            "refreshedAt": refreshed_at,
+            "items": [_serialize_feed_item(item, bookmarked_ids) for item in learn_items],
+        }
+    except Exception as e:
+        logger.error("Dashboard learningPicks error: %s", e)
+        dashboard["learningPicks"] = {"refreshedAt": None, "items": []}
+
+    # ── Local Today ───────────────────────────────────────────
+    try:
+        all_alerts = dashboard_db.get_transit_alerts()
+        non_normal = [a for a in all_alerts if a.get("severity") not in ("normal",)]
+        advisories = []
+        if dashboard.get("weather") and dashboard["weather"].get("rainProbability", 0) > 70:
+            advisories.append({
+                "title": "Heavy rain advisory",
+                "detail": f"{dashboard['weather']['rainProbability']}% chance of rain. Carry an umbrella.",
+            })
+        dashboard["localToday"] = {
+            "alerts": [
+                {"id": a.get("id", ""), "line": a.get("line", ""),
+                 "severity": a.get("severity", "normal"), "title": a.get("title", ""),
+                 "detail": a.get("detail")}
+                for a in non_normal
+            ],
+            "advisories": advisories,
+        }
+    except Exception as e:
+        logger.error("Dashboard localToday error: %s", e)
+        dashboard["localToday"] = {"alerts": [], "advisories": []}
+
+    # ── Trending Repos ────────────────────────────────────────
+    try:
+        repos = dashboard_db.get_repo_trends(today)
+        if not repos:
+            last = dashboard_db.get_latest_repo_cycle()
+            if last:
+                repos = dashboard_db.get_repo_trends(last)
+        dashboard["trendingRepos"] = [
+            {
+                "fullName": r.get("full_name", ""),
+                "description": r.get("description") or "",
+                "language": r.get("language"),
+                "starsGained7d": r.get("stars_gained_7d", 0),
+                "whyItMatters": r.get("why_it_matters") or r.get("description") or "",
+            }
+            for r in repos[:6]
+        ]
+    except Exception as e:
+        logger.error("Dashboard trendingRepos error: %s", e)
+        dashboard["trendingRepos"] = []
+
+    # ── Concept of the Day ────────────────────────────────────
+    try:
+        card = dashboard_db.get_concept_of_day()
+        dashboard["conceptOfTheDay"] = _serialize_card(card) if card else None
+    except Exception as e:
+        logger.error("Dashboard conceptOfTheDay error: %s", e)
+        dashboard["conceptOfTheDay"] = None
+
+    # ── Weekly Stats ──────────────────────────────────────────
+    try:
+        stats = dashboard_db.compute_weekly_stats(user_id)
+        # tasks_done_7d: query Qdrant for completed tasks in last 7 days
+        try:
+            seven_days_ago = (date.today().replace(day=max(1, date.today().day - 7))).isoformat()
+            completed_page = tasks_module.get_tasks(today, user_id)
+            completed = completed_page.get("completed", [])
+            recent_done = sum(
+                1 for t in completed
+                if t.get("completedDate") and t["completedDate"] >= seven_days_ago
+            )
+            stats["tasksDone7d"] = recent_done
+        except Exception:
+            stats["tasksDone7d"] = 0
+        dashboard["weeklyStats"] = {
+            "tasksDone7d": stats["tasksDone7d"],
+            "articlesSaved": stats["articlesSaved"],
+            "cardsMastered": stats["cardsMastered"],
+            "dayStreak": stats["dayStreak"],
+        }
+    except Exception as e:
+        logger.error("Dashboard weeklyStats error: %s", e)
+        dashboard["weeklyStats"] = {"tasksDone7d": 0, "articlesSaved": 0,
+                                    "cardsMastered": 0, "dayStreak": 0}
+
+    return _ok({"dashboard": dashboard})
+
+
+def _serialize_feed_item(item: dict, bookmarked_ids: set) -> dict:
+    """Convert a raw feed_items row to a GraphQL FeedItem shape."""
+    return {
+        "id": item.get("id", ""),
+        "rank": item.get("rank") or 0,
+        "title": item.get("title", ""),
+        "sourceName": item.get("source_name") or "",
+        "tag": item.get("tag") or "research",
+        "summaryShort": item.get("summary_short") or "",
+        "summaryDetail": item.get("summary_detail") or "",
+        "sourceUrl": item.get("source_url") or "",
+        "mediaType": item.get("media_type") or "article",
+        "durationMin": item.get("duration_min"),
+        "bookmarked": item.get("id", "") in bookmarked_ids,
+    }
+
+
+def _serialize_card(card: dict) -> dict:
+    """Convert a learning_cards row to a GraphQL LearningCard shape."""
+    return {
+        "id": card.get("id", ""),
+        "term": card.get("term", ""),
+        "explanation": card.get("explanation", ""),
+        "usageLine": card.get("usage_line"),
+        "codeExample": card.get("code_example"),
+        "pathwayNode": card.get("pathway_node", "fundamentals"),
+        "ease": card.get("ease", 2.5),
+        "timesSeen": card.get("times_seen", 0),
+        "mastered": bool(card.get("mastered", 0)),
+    }
+
+
+async def _handle_save_to_brain(variables: dict, user_id: str) -> dict:
+    """Bookmark a feed item AND ingest it into Qdrant via existing ingestion path."""
+    feed_item_id = variables.get("feedItemId", "").strip()
+    if not feed_item_id:
+        return _err("feedItemId is required")
+
+    item = dashboard_db.get_feed_item_by_id(feed_item_id)
+    if not item:
+        return _err(f"Feed item {feed_item_id} not found")
+
+    # Ingest into Qdrant (existing knowledge path)
+    try:
+        content = f"{item['title']}\n\n{item.get('summary_detail') or item.get('summary_short') or ''}"
+        source_url = item.get("source_url", "")
+        brain.chunk_and_save(content, "AI News", user_id)
+        logger.info("saveToBrain: ingested feed item %s for user %s", feed_item_id, user_id[:8])
+    except Exception as e:
+        logger.error("saveToBrain ingest error: %s", e)
+        # Don't fail the bookmark even if ingest fails
+
+    # Create SQLite bookmark
+    bookmark = dashboard_db.create_bookmark(user_id, feed_item_id)
+    if not bookmark:
+        return _err("Failed to create bookmark")
+
+    return _ok({
+        "saveToBrain": {
+            "id": bookmark["id"],
+            "feedItemId": feed_item_id,
+            "createdAt": bookmark["created_at"],
+        }
+    })
+
+
+async def _handle_review_learning_card(variables: dict, user_id: str) -> dict:
+    card_id = variables.get("cardId", "").strip()
+    result = variables.get("result", "").strip()
+    if not card_id or result not in ("knew_it", "show_again"):
+        return _err("cardId and result (knew_it | show_again) are required")
+
+    updated = dashboard_db.update_learning_card_review(card_id, result)
+    if not updated:
+        return _err(f"Learning card {card_id} not found")
+
+    return _ok({"reviewLearningCard": _serialize_card(updated)})
+
+
+async def _handle_triage_inbox_item(variables: dict, user_id: str) -> dict:
+    item_id = variables.get("itemId", "").strip()
+    action = variables.get("action", "").strip()
+    if not item_id or action not in ("today", "later", "archive"):
+        return _err("itemId and action (today | later | archive) are required")
+
+    today = date.today().isoformat()
+    try:
+        if action == "today":
+            task = tasks_module.edit_task_status(item_id, "pending", user_id)
+        elif action == "archive":
+            tasks_module.delete_task(item_id, user_id)
+            return _ok({"triageInboxItem": {"id": item_id, "content": "", "status": "deleted",
+                                            "createdDate": today, "completedDate": None,
+                                            "carriedOver": False}})
+        else:  # later — move to a future date (tomorrow)
+            from datetime import timedelta
+            tomorrow = (date.today() + timedelta(days=1)).isoformat()
+            task = tasks_module.reschedule_task(item_id, tomorrow, user_id)
+        return _ok({"triageInboxItem": task})
+    except Exception as e:
+        logger.error("triageInboxItem error: %s", e)
+        return _err(str(e))
+
+
+async def _handle_refresh_briefing(user_id: str) -> dict:
+    """Force-refresh the briefing (bypasses 30-min cache)."""
+    try:
+        from pipelines.briefing import generate_briefing
+        briefing = await generate_briefing(user_id, force_refresh=True)
+        if not briefing:
+            return _err("Failed to generate briefing")
+        return _ok({
+            "refreshBriefing": {
+                "id": briefing.get("id"),
+                "text": briefing.get("text", ""),
+                "generatedAt": briefing.get("generated_at", ""),
+                "cycleDate": briefing.get("cycle_date", ""),
+            }
+        })
+    except Exception as e:
+        logger.error("refreshBriefing error: %s", e)
+        return _err(str(e))

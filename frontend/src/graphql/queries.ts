@@ -128,3 +128,176 @@ export const GET_MEMORIES = gql`
     }
   }
 `
+
+// ── Dashboard ──────────────────────────────────────────────────
+
+export const GET_DASHBOARD = gql`
+  query GetDashboard {
+    dashboard {
+      briefing {
+        id
+        text
+        generatedAt
+        cycleDate
+      }
+      weather {
+        tempC
+        rainProbability
+        condition
+        hourly {
+          hour
+          tempC
+          rainMm
+        }
+      }
+      transit {
+        overallSeverity
+        alerts {
+          id
+          line
+          severity
+          title
+          detail
+        }
+      }
+      specialToday {
+        emoji
+        label
+        kind
+        note
+      }
+      today {
+        due {
+          id
+          content
+          status
+          createdDate
+          carriedOver
+        }
+        overdue {
+          id
+          content
+          createdDate
+          daysOverdue
+        }
+        inbox {
+          id
+          content
+          createdDate
+          source
+        }
+      }
+      news {
+        refreshedAt
+        items {
+          id
+          rank
+          title
+          sourceName
+          tag
+          summaryShort
+          summaryDetail
+          sourceUrl
+          mediaType
+          durationMin
+          bookmarked
+        }
+      }
+      learningPicks {
+        refreshedAt
+        items {
+          id
+          rank
+          title
+          sourceName
+          tag
+          summaryShort
+          summaryDetail
+          sourceUrl
+          mediaType
+          durationMin
+          bookmarked
+        }
+      }
+      localToday {
+        alerts {
+          id
+          line
+          severity
+          title
+          detail
+        }
+        advisories {
+          title
+          detail
+        }
+      }
+      trendingRepos {
+        fullName
+        description
+        language
+        starsGained7d
+        whyItMatters
+      }
+      conceptOfTheDay {
+        id
+        term
+        explanation
+        usageLine
+        codeExample
+        pathwayNode
+        ease
+        timesSeen
+        mastered
+      }
+      weeklyStats {
+        tasksDone7d
+        articlesSaved
+        cardsMastered
+        dayStreak
+      }
+    }
+  }
+`
+
+export const SAVE_TO_BRAIN = gql`
+  mutation SaveToBrain($feedItemId: ID!) {
+    saveToBrain(feedItemId: $feedItemId) {
+      id
+      feedItemId
+      createdAt
+    }
+  }
+`
+
+export const REVIEW_LEARNING_CARD = gql`
+  mutation ReviewLearningCard($cardId: ID!, $result: ReviewResult!) {
+    reviewLearningCard(cardId: $cardId, result: $result) {
+      id
+      ease
+      timesSeen
+      mastered
+    }
+  }
+`
+
+export const TRIAGE_INBOX_ITEM = gql`
+  mutation TriageInboxItem($itemId: ID!, $action: TriageAction!) {
+    triageInboxItem(itemId: $itemId, action: $action) {
+      id
+      content
+      status
+    }
+  }
+`
+
+export const REFRESH_BRIEFING = gql`
+  mutation RefreshBriefing {
+    refreshBriefing {
+      id
+      text
+      generatedAt
+      cycleDate
+    }
+  }
+`

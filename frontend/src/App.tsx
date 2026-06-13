@@ -5,13 +5,14 @@ import TasksPage from './components/TasksPage'
 import KnowledgePage from './components/KnowledgePage'
 import LoginPage from './components/LoginPage'
 import SettingsPage from './components/SettingsPage'
+import DashboardPage from './components/DashboardPage'
 import { AuthProvider, useAuth } from './AuthContext'
 import { API_URL } from './config'
 import './App.css'
 
 type Theme = 'dark' | 'light'
 
-type NavPage = 'chat' | 'knowledge' | 'tasks' | 'settings'
+type NavPage = 'dashboard' | 'chat' | 'knowledge' | 'tasks' | 'settings'
 
 interface SystemEvent {
   level: 'OK' | 'INFO' | 'WARN'
@@ -37,7 +38,8 @@ function getInitialTheme(): Theme {
 }
 
 const NAV_ITEMS: { id: NavPage; icon: string; label: string }[] = [
-  { id: 'chat',      icon: '⬡', label: 'Chat'      },
+  { id: 'dashboard', icon: '⬡', label: 'Dashboard'  },
+  { id: 'chat',      icon: '◈', label: 'Chat'       },
   { id: 'knowledge', icon: '◫', label: 'Knowledge'  },
   { id: 'tasks',     icon: '◻', label: 'Tasks'      },
   { id: 'settings',  icon: '⚙', label: 'Settings'   },
@@ -213,7 +215,8 @@ function NotificationBell({ token }: { token: string | null }) {
 function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: string; email: string; avatar_url: string } }) {
   const { token } = useAuth()
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
-  const [page, setPage] = useState<NavPage>('chat')
+  const [page, setPage] = useState<NavPage>('dashboard')
+  const [pendingChatMessage, setPendingChatMessage] = useState<string>('')
   const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([
     { level: 'OK',   message: 'Index update complete' },
     { level: 'INFO', message: '24 new references synced' },
@@ -223,6 +226,19 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
     document.documentElement.setAttribute('data-theme', theme)
     try { localStorage.setItem('pb-theme', theme) } catch {}
   }, [theme])
+
+  // Listen for dashboard → chat navigation events
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ message: string }>).detail
+      if (detail?.message) {
+        setPendingChatMessage(detail.message)
+      }
+      setPage('chat')
+    }
+    window.addEventListener('pb:navigate-chat', handler)
+    return () => window.removeEventListener('pb:navigate-chat', handler)
+  }, [])
 
   const addEvent = useCallback((level: SystemEvent['level'], message: string) => {
     setSystemEvents((prev) => [...prev.slice(-19), { level, message }])
@@ -300,7 +316,11 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
       </aside>
 
       {/* ── Center: session bar + chat OR full-width pages ── */}
-      {page === 'tasks' ? (
+      {page === 'dashboard' ? (
+        <div style={{ gridColumn: '2 / 4', overflow: 'hidden', height: '100vh' }}>
+          <DashboardPage setPage={setPage} />
+        </div>
+      ) : page === 'tasks' ? (
         <div style={{ gridColumn: '2 / 4', overflow: 'hidden' }}>
           <TasksPage />
         </div>
@@ -327,6 +347,8 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
             <Chat
               onDrillCategory={handleDrill}
               onAgentAction={handleAgentAction}
+              initialMessage={pendingChatMessage}
+              onInitialMessageConsumed={() => setPendingChatMessage('')}
             />
           </main>
           <RightPanel systemEvents={systemEvents} />

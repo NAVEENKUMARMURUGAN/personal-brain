@@ -1,0 +1,20 @@
+[
+  {
+    "emoji": "🎬",
+    "label": "Jurassic Park premiered 33 years ago today",
+    "kind": "film",
+    "note": "Spielberg's 1993 blockbuster opened in Australian cinemas on this date — still the gold standard for practical-meets-digital effects."
+  },
+  {
+    "emoji": "🍩",
+    "label": "World Donut Day",
+    "kind": "observance",
+    "note": "The first Friday of June every year. Originated in 1938 to honour Salvation Army volunteers who served donuts to soldiers in WWII."
+  },
+  {
+    "emoji": "🌏",
+    "label": "1983: Australia wins the America's Cup for the first time",
+    "kind": "event",
+    "note": "Australia II ended a 132-year American winning streak — the longest winning streak in the history of sport."
+  }
+]

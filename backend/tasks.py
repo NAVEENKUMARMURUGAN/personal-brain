@@ -199,6 +199,40 @@ def search_tasks(query: str, date: str, user_id: str) -> list[dict]:
     return [_row_to_task(r) for r in results]
 
 
+def edit_task_status(task_id: str, new_status: str, user_id: str) -> dict:
+    """Update a task's status field (used by inbox triage)."""
+    result = _qdrant.retrieve(collection_name=COLLECTION_NAME, ids=[task_id],
+                              with_payload=True, with_vectors=True)
+    if not result:
+        raise ValueError(f"Task {task_id} not found")
+    point = result[0]
+    if point.payload.get("user_id") != user_id:
+        raise ValueError(f"Task {task_id} does not belong to this user")
+
+    updated_payload = dict(point.payload)
+    updated_payload["status"] = new_status
+    _qdrant.upsert(collection_name=COLLECTION_NAME,
+                   points=[PointStruct(id=task_id, vector=point.vector, payload=updated_payload)])
+    return _row_to_task(type("P", (), {"id": task_id, "payload": updated_payload})())
+
+
+def reschedule_task(task_id: str, new_date: str, user_id: str) -> dict:
+    """Move a task to a different date."""
+    result = _qdrant.retrieve(collection_name=COLLECTION_NAME, ids=[task_id],
+                              with_payload=True, with_vectors=True)
+    if not result:
+        raise ValueError(f"Task {task_id} not found")
+    point = result[0]
+    if point.payload.get("user_id") != user_id:
+        raise ValueError(f"Task {task_id} does not belong to this user")
+
+    updated_payload = dict(point.payload)
+    updated_payload["createdDate"] = new_date
+    _qdrant.upsert(collection_name=COLLECTION_NAME,
+                   points=[PointStruct(id=task_id, vector=point.vector, payload=updated_payload)])
+    return _row_to_task(type("P", (), {"id": task_id, "payload": updated_payload})())
+
+
 def get_completed_tasks_last_n_days(days: int = 30, user_id: str = "") -> list[dict]:
     from datetime import timedelta
     today = datetime.now(timezone.utc).date()

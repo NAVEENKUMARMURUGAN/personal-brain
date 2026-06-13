@@ -1,0 +1,190 @@
+/* ConceptCard.css — flip card for "Concept of the Day" widget */
+
+.concept-card {
+  perspective: 800px;
+  width: 100%;
+  min-height: 180px;
+}
+
+.concept-card__inner {
+  position: relative;
+  width: 100%;
+  min-height: 180px;
+  transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-style: preserve-3d;
+}
+
+.concept-card__inner--flipped {
+  transform: rotateY(180deg);
+}
+
+.concept-card__face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  background: var(--bg-card);
+  border: 1px solid var(--border-base);
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.concept-card__back {
+  transform: rotateY(180deg);
+}
+
+/* Front face */
+.concept-card__pathway {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-family: var(--mono-font);
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid var(--accent-border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  width: fit-content;
+}
+
+.concept-card__term {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.concept-card__flip-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--mono-font);
+  margin-top: auto;
+}
+
+/* Back face */
+.concept-card__explanation {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  flex: 1;
+}
+
+.concept-card__usage {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.concept-card__code {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  color: var(--accent);
+  background: var(--bg-code);
+  border: 1px solid var(--border-base);
+  border-radius: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* Action buttons */
+.concept-card__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.concept-card__btn {
+  flex: 1;
+  padding: 7px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-base);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--mono-font);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  text-align: center;
+}
+
+.concept-card__btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.concept-card__btn--knew {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.concept-card__btn--knew:hover {
+  background: var(--accent-dim);
+}
+
+/* Pathway strip */
+.concept-card__pathway-strip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  overflow-x: auto;
+  padding: 12px 0 4px;
+  scrollbar-width: none;
+}
+
+.concept-card__pathway-strip::-webkit-scrollbar { display: none; }
+
+.concept-card__path-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.concept-card__path-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  border: 2px solid var(--border-base);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.concept-card__path-dot--active {
+  background: var(--accent);
+  border-color: var(--accent-border);
+  box-shadow: 0 0 6px var(--accent-border);
+}
+
+.concept-card__path-label {
+  font-size: 9px;
+  font-family: var(--mono-font);
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.concept-card__path-label--active {
+  color: var(--accent);
+}
+
+.concept-card__path-connector {
+  width: 24px;
+  height: 1px;
+  background: var(--border-base);
+  flex-shrink: 0;
+  margin-bottom: 14px;
+}

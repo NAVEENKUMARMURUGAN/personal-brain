@@ -14,6 +14,7 @@ from typing import Optional
 import brain
 import tasks as tasks_module
 import history
+import dashboard_db
 import graphql_handler
 import auth
 import telegram_bot
@@ -113,7 +114,9 @@ async def startup():
     history.ensure_db()
     auth.ensure_users_table()
     telegram_bot.ensure_telegram_table()
+    dashboard_db.ensure_dashboard_tables()
     telegram_bot.start_scheduler()
+    _register_dashboard_pipelines()
     if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("BACKEND_URL"):
         await telegram_bot.set_webhook(BACKEND_URL)
 
@@ -122,6 +125,30 @@ async def startup():
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+
+def _register_dashboard_pipelines() -> None:
+    """Register all dashboard background pipelines with the existing APScheduler instance."""
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
+    from telegram_bot import scheduler
+    from pipelines import news, learning, repos, special, transit
+
+    def _add(job_fn, trigger, job_id: str) -> None:
+        try:
+            scheduler.add_job(
+                job_fn, trigger, id=job_id,
+                replace_existing=True, misfire_grace_time=300,
+            )
+            logger.info("Dashboard pipeline registered: %s", job_id)
+        except Exception as e:
+            logger.error("Failed to register pipeline %s: %s", job_id, e)
+
+    _add(news.run_pipeline,     IntervalTrigger(hours=6),        "dashboard_news")
+    _add(learning.run_pipeline, IntervalTrigger(hours=48),       "dashboard_learning")
+    _add(repos.run_pipeline,    CronTrigger(hour=2, minute=0),   "dashboard_repos")
+    _add(special.run_pipeline,  CronTrigger(hour=0, minute=30),  "dashboard_special")
+    _add(transit.run_pipeline,  IntervalTrigger(minutes=10),     "dashboard_transit")
 
 
 @app.get("/health")
