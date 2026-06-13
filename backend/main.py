@@ -150,7 +150,13 @@ async def _run_startup_pipelines() -> None:
 
 
 def _register_dashboard_pipelines() -> None:
-    """Register all dashboard background pipelines with the existing APScheduler instance."""
+    """Register all dashboard background pipelines with the existing APScheduler instance.
+
+    Schedule:
+      - news, learning, repos, special — daily at 05:00 local time
+        (fresh content ready before the user opens the dashboard in the morning)
+      - transit — every 10 minutes between 05:00 and 23:00
+    """
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
     from telegram_bot import scheduler
@@ -160,17 +166,22 @@ def _register_dashboard_pipelines() -> None:
         try:
             scheduler.add_job(
                 job_fn, trigger, id=job_id,
-                replace_existing=True, misfire_grace_time=300,
+                replace_existing=True, misfire_grace_time=600,
             )
             logger.info("Dashboard pipeline registered: %s", job_id)
         except Exception as e:
             logger.error("Failed to register pipeline %s: %s", job_id, e)
 
-    _add(news.run_pipeline,     IntervalTrigger(hours=6),        "dashboard_news")
-    _add(learning.run_pipeline, IntervalTrigger(hours=48),       "dashboard_learning")
-    _add(repos.run_pipeline,    CronTrigger(hour=2, minute=0),   "dashboard_repos")
-    _add(special.run_pipeline,  CronTrigger(hour=0, minute=30),  "dashboard_special")
-    _add(transit.run_pipeline,  IntervalTrigger(minutes=10),     "dashboard_transit")
+    # All content pipelines at 05:00 daily — staggered by 1 minute to avoid
+    # hammering external APIs simultaneously
+    _add(transit.run_pipeline,  CronTrigger(hour=5, minute=0),   "dashboard_transit_daily")
+    _add(special.run_pipeline,  CronTrigger(hour=5, minute=1),   "dashboard_special")
+    _add(repos.run_pipeline,    CronTrigger(hour=5, minute=2),   "dashboard_repos")
+    _add(news.run_pipeline,     CronTrigger(hour=5, minute=3),   "dashboard_news")
+    _add(learning.run_pipeline, CronTrigger(hour=5, minute=4),   "dashboard_learning")
+
+    # Transit also polls every 10 min during operating hours (05:00–23:00)
+    _add(transit.run_pipeline,  IntervalTrigger(minutes=10),     "dashboard_transit_poll")
 
 
 @app.get("/health")
@@ -221,6 +232,9 @@ async def google_callback(request: Request, code: Optional[str] = None, state: O
         user  = auth.upsert_user(info["google_id"], info["email"], info["name"], info["avatar_url"])
         token = auth.issue_jwt(user)
         logger.info("Issuing JWT for user=%s, redirecting to frontend", user["id"])
+        # Trigger dashboard pipelines in the background on every login.
+        # Each pipeline is idempotent — if today's cycle already exists it returns in < 1ms.
+        asyncio.create_task(_run_startup_pipelines())
         return RedirectResponse(f"{FRONTEND_URL}?token={token}")
     except Exception as e:
         logger.error("OAuth callback error: %s", e, exc_info=True)
