@@ -10,9 +10,12 @@
 .dashboard {
   width: 100%;
   height: 100%;
+  min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-page);
   padding: 0;
+  flex: 1;
 }
 
 .dashboard::-webkit-scrollbar { width: 4px; }
@@ -20,12 +23,12 @@
 .dashboard::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 2px; }
 
 .dashboard__container {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 24px 24px 48px;
+  width: 100%;
+  padding: 24px 32px 48px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+  box-sizing: border-box;
 }
 
 /* ════════════════════════════════════════════════════════════
@@ -803,16 +806,15 @@
    WIDE SCREEN: Concept card floats right of Today
    ════════════════════════════════════════════════════════════ */
 
-@media (min-width: 900px) {
-  .dashboard__today-concept-row {
-    display: grid;
-    grid-template-columns: 1fr 280px;
-    gap: 16px;
-    align-items: start;
-  }
+/* Wide: concept card floats right of Today */
+.dashboard__today-concept-row {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 16px;
+  align-items: start;
 }
 
-@media (max-width: 899px) {
+@media (max-width: 1100px) {
   .dashboard__today-concept-row {
     display: flex;
     flex-direction: column;

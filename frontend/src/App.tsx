@@ -317,7 +317,7 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
 
       {/* ── Center: session bar + chat OR full-width pages ── */}
       {page === 'dashboard' ? (
-        <div style={{ gridColumn: '2 / 4', overflow: 'hidden', height: '100vh' }}>
+        <div style={{ gridColumn: '2 / 4', overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
           <DashboardPage setPage={setPage} />
         </div>
       ) : page === 'tasks' ? (
