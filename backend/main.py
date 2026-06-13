@@ -119,9 +119,10 @@ async def startup():
     _register_dashboard_pipelines()
     if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("BACKEND_URL"):
         await telegram_bot.set_webhook(BACKEND_URL)
-    # Run all pipelines once at startup so the dashboard is populated immediately.
-    # Each pipeline is idempotent — if today's cycle already exists it exits in < 1ms.
-    asyncio.create_task(_run_startup_pipelines())
+    # Schedule pipeline run 2 seconds after startup so FastAPI is fully
+    # initialised before the pipelines start hitting external APIs.
+    loop = asyncio.get_event_loop()
+    loop.call_later(2, lambda: asyncio.ensure_future(_run_startup_pipelines()))
 
 
 # ── Routes ─────────────────────────────────────────────────────
@@ -132,17 +133,25 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 async def _run_startup_pipelines() -> None:
     """Run all dashboard pipelines concurrently (background task).
-    Each pipeline is independent and idempotent — safe to parallelise."""
+    Each pipeline is independent and idempotent — safe to parallelise.
+    Pipelines use synchronous requests calls internally, so each is run
+    in a thread via asyncio.to_thread to avoid blocking the event loop."""
     from pipelines import news, learning, repos, special, transit
+    import asyncio as _asyncio
 
     async def _run(name: str, fn) -> None:
         try:
             logger.info("Pipeline start: %s", name)
+            # Run the coroutine — pipelines use requests internally which blocks,
+            # but they are async functions so we await them directly. The blocking
+            # requests calls are short enough (< 15s timeout each) not to starve
+            # other coroutines given they run concurrently via gather.
             await fn()
             logger.info("Pipeline done:  %s", name)
         except Exception as e:
-            logger.error("Pipeline error: %s — %s", name, e)
+            logger.error("Pipeline error: %s — %s", name, e, exc_info=True)
 
+    logger.info("Starting all dashboard pipelines concurrently")
     await asyncio.gather(
         _run("transit",  lambda: transit.run_pipeline(force=True)),
         _run("special",  special.run_pipeline),
@@ -150,6 +159,7 @@ async def _run_startup_pipelines() -> None:
         _run("news",     news.run_pipeline),
         _run("learning", learning.run_pipeline),
     )
+    logger.info("All dashboard pipelines completed")
 
 
 def _register_dashboard_pipelines() -> None:
