@@ -131,22 +131,25 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 
 async def _run_startup_pipelines() -> None:
-    """Run all dashboard pipelines once at startup (background task).
-    Each pipeline checks its own cycle_date guard — safe to run on every restart."""
+    """Run all dashboard pipelines concurrently (background task).
+    Each pipeline is independent and idempotent — safe to parallelise."""
     from pipelines import news, learning, repos, special, transit
-    pipeline_jobs = [
-        ("transit",  transit.run_pipeline),
-        ("special",  special.run_pipeline),
-        ("repos",    repos.run_pipeline),
-        ("news",     news.run_pipeline),
-        ("learning", learning.run_pipeline),
-    ]
-    for name, fn in pipeline_jobs:
+
+    async def _run(name: str, fn) -> None:
         try:
-            logger.info("Startup pipeline: running %s", name)
+            logger.info("Pipeline start: %s", name)
             await fn()
+            logger.info("Pipeline done:  %s", name)
         except Exception as e:
-            logger.error("Startup pipeline %s failed: %s", name, e)
+            logger.error("Pipeline error: %s — %s", name, e)
+
+    await asyncio.gather(
+        _run("transit",  transit.run_pipeline),
+        _run("special",  special.run_pipeline),
+        _run("repos",    repos.run_pipeline),
+        _run("news",     news.run_pipeline),
+        _run("learning", learning.run_pipeline),
+    )
 
 
 def _register_dashboard_pipelines() -> None:
@@ -172,16 +175,12 @@ def _register_dashboard_pipelines() -> None:
         except Exception as e:
             logger.error("Failed to register pipeline %s: %s", job_id, e)
 
-    # All content pipelines at 05:00 daily — staggered by 1 minute to avoid
-    # hammering external APIs simultaneously
-    _add(transit.run_pipeline,  CronTrigger(hour=5, minute=0),   "dashboard_transit_daily")
-    _add(special.run_pipeline,  CronTrigger(hour=5, minute=1),   "dashboard_special")
-    _add(repos.run_pipeline,    CronTrigger(hour=5, minute=2),   "dashboard_repos")
-    _add(news.run_pipeline,     CronTrigger(hour=5, minute=3),   "dashboard_news")
-    _add(learning.run_pipeline, CronTrigger(hour=5, minute=4),   "dashboard_learning")
+    # All content pipelines triggered together at 05:00 via a single wrapper job
+    # that runs them all concurrently with asyncio.gather
+    _add(_run_startup_pipelines, CronTrigger(hour=5, minute=0),  "dashboard_daily_05h")
 
     # Transit also polls every 10 min during operating hours (05:00–23:00)
-    _add(transit.run_pipeline,  IntervalTrigger(minutes=10),     "dashboard_transit_poll")
+    _add(transit.run_pipeline,   IntervalTrigger(minutes=10),    "dashboard_transit_poll")
 
 
 @app.get("/health")
