@@ -270,7 +270,7 @@ TOOLS = [
 # Dashboard context builder
 # ─────────────────────────────────────────────────────────────
 
-def _build_dashboard_context() -> str:
+def _build_dashboard_context(user_id: str = "") -> str:
     """Assemble a concise ENVIRONMENT block from cached dashboard data.
 
     Reads only from SQLite caches — never calls external APIs.
@@ -328,9 +328,50 @@ def _build_dashboard_context() -> str:
     except Exception:
         pass
 
+    # Today's reminders/meetings set via chat
+    if user_id:
+        try:
+            reminders_str = _get_user_reminders_today(user_id)
+            if reminders_str:
+                lines.append(f"Reminders today: {reminders_str}")
+        except Exception:
+            pass
+
     if not lines:
         return "(weather and transit data not yet available)"
     return "\n".join(lines)
+
+
+def _get_user_reminders_today(user_id: str) -> str:
+    """Return today's reminders for this user from APScheduler, formatted as a string."""
+    try:
+        import sqlite3 as _sqlite3, re, os as _os
+        from datetime import date as _date
+        sqlite_path = _os.getenv("SQLITE_PATH", "/app/history.db")
+        conn = _sqlite3.connect(sqlite_path)
+        conn.row_factory = _sqlite3.Row
+        row = conn.execute(
+            "SELECT telegram_id FROM telegram_users WHERE user_id = ? OR linked_google_user_id = ?",
+            (user_id, user_id)
+        ).fetchone()
+        conn.close()
+        if not row:
+            return ""
+        telegram_id = row["telegram_id"]
+        from telegram_bot import scheduler
+        today = _date.today().isoformat()
+        parts = []
+        for job in scheduler.get_jobs():
+            if not job.id.startswith(f"reminder_{telegram_id}_"):
+                continue
+            if job.next_run_time and job.next_run_time.date().isoformat() == today:
+                args = job.args or []
+                msg = str(args[1]) if len(args) > 1 else ""
+                clean = re.sub(r"^⏰ \*Reminder.*?\*\n+", "", msg, flags=re.DOTALL).strip()
+                parts.append(f"{job.next_run_time.strftime('%H:%M')} — {clean}")
+        return "; ".join(parts) if parts else ""
+    except Exception:
+        return ""
 
 
 # ─────────────────────────────────────────────────────────────
@@ -716,7 +757,7 @@ async def process_message(ctx: ContextManager, user_id: str) -> dict:
 
     system = SYSTEM_PROMPT.format(
         today=today,
-        dashboard_context=_build_dashboard_context(),
+        dashboard_context=_build_dashboard_context(user_id=user_id),
         categories="\n".join(f"- {c['name']}" for c in ctx.categories) or "(none yet)",
         pending_tasks="\n".join(f"- [{t['id']}] {t['content']}" for t in ctx.pending_tasks) or "(none)",
         relevant_memories="\n".join(f"- [{m['category']}] {m['content']}" for m in ctx.relevant_memories) or "(none)",

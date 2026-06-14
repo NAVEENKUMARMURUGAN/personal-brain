@@ -157,7 +157,64 @@ async def _gather_context(user_id: str, today: str) -> dict:
     except Exception:
         context["concept_term"] = None
 
+    # Today's scheduled reminders from APScheduler (user-set via chat)
+    try:
+        context["reminders"] = _get_todays_reminders(user_id, today)
+    except Exception as e:
+        logger.warning("Briefing: reminders fetch failed: %s", e)
+        context["reminders"] = []
+
     return context
+
+
+def _get_todays_reminders(user_id: str, today: str) -> list[dict]:
+    """
+    Return all APScheduler reminder jobs for this user scheduled for today.
+    Each reminder job ID follows the format: reminder_{telegram_id}_{iso_datetime}
+    We look up the user's telegram_id and filter matching jobs.
+    """
+    try:
+        import sqlite3 as _sqlite3
+        sqlite_path = os.getenv("SQLITE_PATH", "/app/history.db")
+        conn = _sqlite3.connect(sqlite_path)
+        conn.row_factory = _sqlite3.Row
+        row = conn.execute(
+            "SELECT telegram_id FROM telegram_users WHERE user_id = ? OR linked_google_user_id = ?",
+            (user_id, user_id)
+        ).fetchone()
+        conn.close()
+
+        if not row:
+            return []
+
+        telegram_id = row["telegram_id"]
+
+        from telegram_bot import scheduler
+        jobs = scheduler.get_jobs()
+        todays_reminders = []
+
+        for job in jobs:
+            if not job.id.startswith(f"reminder_{telegram_id}_"):
+                continue
+            next_run = job.next_run_time
+            if next_run and next_run.date().isoformat() == today:
+                # Extract the reminder text from job args
+                args = job.args or []
+                msg = str(args[1]) if len(args) > 1 else "Reminder"
+                # Strip the "⏰ Reminder, name!\n\n" prefix for brevity
+                import re
+                clean = re.sub(r"^⏰ \*Reminder.*?\*\n+", "", msg, flags=re.DOTALL).strip()
+                todays_reminders.append({
+                    "time": next_run.strftime("%H:%M"),
+                    "message": clean,
+                })
+
+        todays_reminders.sort(key=lambda r: r["time"])
+        return todays_reminders
+
+    except Exception as e:
+        logger.warning("_get_todays_reminders failed: %s", e)
+        return []
 
 
 async def _call_claude(context: dict) -> Optional[str]:
@@ -177,11 +234,20 @@ async def _call_claude(context: dict) -> Optional[str]:
     if context.get("transit_disrupted"):
         transit_line = f"Transit alert: {context['transit_summary']} on {context.get('transit_line', 'your line')}."
 
-    prompt = f"""Write a single paragraph (≤60 words) for a morning dashboard briefing.
+    # Format reminders line
+    reminders = context.get("reminders", [])
+    if reminders:
+        reminder_parts = [f"{r['time']} — {r['message']}" for r in reminders[:3]]
+        reminders_line = "Reminders today: " + "; ".join(reminder_parts) + "."
+    else:
+        reminders_line = ""
+
+    prompt = f"""Write a single paragraph (≤75 words) for a morning dashboard briefing.
 Tone: direct, friendly, not cutesy. No emoji. No greeting line (do not start with "Good morning").
 
 Facts to weave in naturally — include ALL that are non-empty:
 - Tasks: {task_detail}
+- Reminders/meetings: {reminders_line or "no reminders scheduled"}
 - Weather: {weather_line or "No notable weather"}
 - Transit: {transit_line or "Normal service"}
 - Special: {context.get("special_item") or "nothing special"}
@@ -190,9 +256,10 @@ Facts to weave in naturally — include ALL that are non-empty:
 
 Rules:
 1. Task count MUST appear (number, not just "some tasks").
-2. Mention weather only if rain > 60% or condition is notable.
-3. Mention transit only if disrupted.
-4. Keep it ≤ 60 words. Output the paragraph only — no labels, no JSON.
+2. If there are reminders/meetings today, mention at least one with its time.
+3. Mention weather only if rain > 60% or condition is notable.
+4. Mention transit only if disrupted.
+5. Keep it ≤ 75 words. Output the paragraph only — no labels, no JSON.
 """
 
     result = await call_claude_json(
