@@ -142,8 +142,16 @@ export const GET_DASHBOARD = gql`
       }
       weather {
         tempC
+        feelsLikeC
         rainProbability
         condition
+        windKmh
+        uvIndex
+        uvMax
+        precipSumMm
+        windMaxKmh
+        sunrise
+        sunset
         hourly {
           hour
           tempC
@@ -230,6 +238,8 @@ export const GET_DASHBOARD = gql`
         advisories {
           title
           detail
+          icon
+          severity
         }
       }
       trendingRepos {

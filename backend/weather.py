@@ -67,8 +67,10 @@ def _fetch_weather() -> dict:
     url = (
         f"https://api.open-meteo.com/v1/forecast"
         f"?latitude={LAT}&longitude={LON}"
-        f"&current=temperature_2m,precipitation_probability,weathercode"
+        f"&current=temperature_2m,precipitation_probability,weathercode,"
+        f"windspeed_10m,uv_index,apparent_temperature"
         f"&hourly=temperature_2m,precipitation,weathercode"
+        f"&daily=sunrise,sunset,uv_index_max,precipitation_sum,windspeed_10m_max"
         f"&forecast_days=2"
         f"&timezone=auto"
     )
@@ -78,9 +80,31 @@ def _fetch_weather() -> dict:
 
     current = data.get("current", {})
     temp_c = round(current.get("temperature_2m", 0), 1)
+    feels_like = round(current.get("apparent_temperature", temp_c), 1)
     rain_prob = int(current.get("precipitation_probability", 0) or 0)
     wmo_code = int(current.get("weathercode", 0) or 0)
     condition = _WMO_CONDITIONS.get(wmo_code, "Unknown")
+    wind_kmh = round(current.get("windspeed_10m", 0) or 0, 1)
+    uv_index = round(current.get("uv_index", 0) or 0, 1)
+
+    # Daily summary (today = index 0)
+    daily = data.get("daily", {})
+    sunrise = (daily.get("sunrise") or [""])[0]
+    sunset  = (daily.get("sunset")  or [""])[0]
+    uv_max  = round((daily.get("uv_index_max") or [0])[0], 1)
+    precip_sum = round((daily.get("precipitation_sum") or [0])[0], 1)
+    wind_max   = round((daily.get("windspeed_10m_max") or [0])[0], 1)
+
+    # Format sunrise/sunset to HH:MM
+    def _fmt_time(iso: str) -> str:
+        try:
+            from datetime import datetime as _dt
+            return _dt.fromisoformat(iso).strftime("%H:%M")
+        except Exception:
+            return ""
+
+    sunrise_fmt = _fmt_time(sunrise)
+    sunset_fmt  = _fmt_time(sunset)
 
     # Build next-24h hourly strip
     hourly = data.get("hourly", {})
@@ -111,11 +135,24 @@ def _fetch_weather() -> dict:
 
     return {
         "tempC": temp_c,
+        "feelsLikeC": feels_like,
         "rainProbability": rain_prob,
         "condition": condition,
+        "windKmh": wind_kmh,
+        "uvIndex": uv_index,
+        "uvMax": uv_max,
+        "precipSumMm": precip_sum,
+        "windMaxKmh": wind_max,
+        "sunrise": sunrise_fmt,
+        "sunset": sunset_fmt,
         "hourly": hourly_strip,
     }
 
 
 def _empty_weather() -> dict:
-    return {"tempC": 0.0, "rainProbability": 0, "condition": "Unavailable", "hourly": []}
+    return {
+        "tempC": 0.0, "feelsLikeC": 0.0, "rainProbability": 0,
+        "condition": "Unavailable", "windKmh": 0.0, "uvIndex": 0.0,
+        "uvMax": 0.0, "precipSumMm": 0.0, "windMaxKmh": 0.0,
+        "sunrise": "", "sunset": "", "hourly": [],
+    }

@@ -139,8 +139,16 @@ type Briefing {
 
 type Weather {
   tempC: Float!
+  feelsLikeC: Float
   rainProbability: Int!
   condition: String!
+  windKmh: Float
+  uvIndex: Float
+  uvMax: Float
+  precipSumMm: Float
+  windMaxKmh: Float
+  sunrise: String
+  sunset: String
   hourly: [HourlyWeather!]!
 }
 
@@ -216,7 +224,9 @@ type LocalSection {
 
 type WeatherAdvisory {
   title: String!
-  detail: String!
+  detail: String
+  icon: String
+  severity: String
 }
 
 type Repo {
@@ -514,10 +524,18 @@ async def _handle_dashboard(user_id: str) -> dict:
     try:
         w = weather_module.get_weather()
         dashboard["weather"] = {
-            "tempC": w.get("tempC", 0.0),
-            "rainProbability": w.get("rainProbability", 0),
-            "condition": w.get("condition", ""),
-            "hourly": w.get("hourly", []),
+            "tempC":          w.get("tempC", 0.0),
+            "feelsLikeC":     w.get("feelsLikeC", 0.0),
+            "rainProbability":w.get("rainProbability", 0),
+            "condition":      w.get("condition", ""),
+            "windKmh":        w.get("windKmh", 0.0),
+            "uvIndex":        w.get("uvIndex", 0.0),
+            "uvMax":          w.get("uvMax", 0.0),
+            "precipSumMm":    w.get("precipSumMm", 0.0),
+            "windMaxKmh":     w.get("windMaxKmh", 0.0),
+            "sunrise":        w.get("sunrise", ""),
+            "sunset":         w.get("sunset", ""),
+            "hourly":         w.get("hourly", []),
         }
     except Exception as e:
         logger.error("Dashboard weather error: %s", e)
@@ -636,20 +654,126 @@ async def _handle_dashboard(user_id: str) -> dict:
     # ── Local Today ───────────────────────────────────────────
     try:
         all_alerts = dashboard_db.get_transit_alerts()
-        non_normal = [a for a in all_alerts if a.get("severity") not in ("normal",)]
-        advisories = []
-        if dashboard.get("weather") and dashboard["weather"].get("rainProbability", 0) > 70:
-            advisories.append({
-                "title": "Heavy rain advisory",
-                "detail": f"{dashboard['weather']['rainProbability']}% chance of rain. Carry an umbrella.",
+        transit_alerts_out = []
+
+        # All transit lines — show disruptions with severity, normals as green
+        for a in all_alerts:
+            a = dict(a)
+            transit_alerts_out.append({
+                "id":       a.get("id", ""),
+                "line":     a.get("line", ""),
+                "severity": a.get("severity", "normal"),
+                "title":    a.get("title", "Normal Service"),
+                "detail":   a.get("detail"),
             })
+
+        # Weather-derived advisories — multiple thresholds, not just rain
+        advisories = []
+        w = dashboard.get("weather") or {}
+
+        rain_prob   = w.get("rainProbability", 0)
+        temp_c      = w.get("tempC", 20)
+        feels_like  = w.get("feelsLikeC", temp_c)
+        wind_kmh    = w.get("windKmh", 0)
+        wind_max    = w.get("windMaxKmh", 0)
+        uv_max      = w.get("uvMax", 0)
+        precip_sum  = w.get("precipSumMm", 0)
+        sunrise     = w.get("sunrise", "")
+        sunset      = w.get("sunset", "")
+        condition   = w.get("condition", "")
+
+        if rain_prob >= 70:
+            advisories.append({
+                "title": f"Heavy rain likely — {rain_prob}% chance",
+                "detail": f"Expected rainfall {precip_sum}mm today. Carry an umbrella and allow extra travel time.",
+                "icon": "🌧", "severity": "major",
+            })
+        elif rain_prob >= 40:
+            advisories.append({
+                "title": f"Rain possible — {rain_prob}% chance",
+                "detail": "Light rain possible. An umbrella wouldn't hurt.",
+                "icon": "🌦", "severity": "minor",
+            })
+
+        if temp_c >= 35 or feels_like >= 37:
+            advisories.append({
+                "title": f"Extreme heat — {temp_c}°C (feels {feels_like}°C)",
+                "detail": "Stay hydrated, limit outdoor activity during peak hours (11am–3pm), and wear sunscreen.",
+                "icon": "🥵", "severity": "major",
+            })
+        elif temp_c >= 28:
+            advisories.append({
+                "title": f"Hot day — {temp_c}°C",
+                "detail": f"Feels like {feels_like}°C. UV index up to {uv_max} — apply sunscreen if heading outside.",
+                "icon": "☀️", "severity": "minor",
+            })
+        elif temp_c <= 5:
+            advisories.append({
+                "title": f"Cold day — {temp_c}°C",
+                "detail": f"Feels like {feels_like}°C. Dress in layers.",
+                "icon": "🧊", "severity": "minor",
+            })
+
+        if uv_max >= 8:
+            advisories.append({
+                "title": f"Very high UV — index {uv_max}",
+                "detail": "SPF 50+ sunscreen, hat and protective clothing recommended if outdoors.",
+                "icon": "🕶", "severity": "minor",
+            })
+        elif uv_max >= 6 and not any(a["icon"] in ("🥵", "☀️") for a in advisories):
+            advisories.append({
+                "title": f"High UV today — index {uv_max}",
+                "detail": "Apply sunscreen before heading out.",
+                "icon": "☀️", "severity": "info",
+            })
+
+        if wind_max >= 60:
+            advisories.append({
+                "title": f"Strong winds — up to {wind_max} km/h",
+                "detail": "Secure outdoor furniture and allow extra travel time. Delays likely on exposed routes.",
+                "icon": "💨", "severity": "major",
+            })
+        elif wind_max >= 40:
+            advisories.append({
+                "title": f"Windy conditions — up to {wind_max} km/h",
+                "detail": "Gusty winds expected. Take care on elevated areas and cycle paths.",
+                "icon": "💨", "severity": "minor",
+            })
+
+        if "thunder" in condition.lower():
+            advisories.append({
+                "title": "Thunderstorm warning",
+                "detail": "Lightning and heavy rain possible. Avoid open areas and postpone outdoor activities.",
+                "icon": "⛈", "severity": "major",
+            })
+
+        # Sunrise / sunset info always shown (informational)
+        if sunrise and sunset:
+            advisories.append({
+                "title": f"Sunrise {sunrise} · Sunset {sunset}",
+                "detail": None,
+                "icon": "🌅", "severity": "info",
+            })
+
+        # Today's special events from special_today table
+        try:
+            import json as _json
+            special_rows = dashboard_db.get_special_today(today)
+            if special_rows:
+                items_json = dict(special_rows[0]).get("items_json", "[]")
+                items = _json.loads(items_json) if isinstance(items_json, str) else items_json
+                for it in items:
+                    advisories.append({
+                        "title": f"{it.get('emoji', '')} {it.get('label', '')}",
+                        "detail": it.get("note"),
+                        "icon": it.get("emoji", "📅"),
+                        "severity": "personal" if it.get("kind") == "personal" else "info",
+                    })
+        except Exception as e:
+            logger.warning("localToday special items error: %s", e)
+
         dashboard["localToday"] = {
-            "alerts": [
-                {"id": a.get("id", ""), "line": a.get("line", ""),
-                 "severity": a.get("severity", "normal"), "title": a.get("title", ""),
-                 "detail": a.get("detail")}
-                for a in non_normal
-            ],
+            "alerts":    transit_alerts_out,
             "advisories": advisories,
         }
     except Exception as e:

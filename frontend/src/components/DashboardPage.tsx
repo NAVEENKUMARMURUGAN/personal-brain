@@ -28,15 +28,26 @@ interface Repo { fullName: string; description: string; language?: string | null
 interface LearningCardData { id: string; term: string; explanation: string; usageLine?: string | null; codeExample?: string | null; pathwayNode: string; ease: number; timesSeen: number; mastered: boolean }
 interface WeeklyStats { tasksDone7d: number; articlesSaved: number; cardsMastered: number; dayStreak: number }
 
+interface Advisory {
+  title: string
+  detail?: string | null
+  icon?: string | null
+  severity?: string | null
+}
+
 interface DashboardData {
   briefing?: { id?: string; text: string; generatedAt: string; cycleDate: string } | null
-  weather?: { tempC: number; rainProbability: number; condition: string; hourly: HourlyWeather[] } | null
+  weather?: {
+    tempC: number; feelsLikeC?: number; rainProbability: number; condition: string
+    windKmh?: number; uvIndex?: number; uvMax?: number; precipSumMm?: number
+    windMaxKmh?: number; sunrise?: string; sunset?: string; hourly: HourlyWeather[]
+  } | null
   transit: { overallSeverity: string; alerts: TransitAlert[] }
   specialToday: SpecialItem[]
   today: { due: DueTask[]; overdue: OverdueTask[]; inbox: InboxItem[] }
   news: { refreshedAt?: string | null; items: FeedItem[] }
   learningPicks: { refreshedAt?: string | null; items: FeedItem[] }
-  localToday: { alerts: TransitAlert[]; advisories: { title: string; detail: string }[] }
+  localToday: { alerts: TransitAlert[]; advisories: Advisory[] }
   trendingRepos: Repo[]
   conceptOfTheDay?: LearningCardData | null
   weeklyStats: WeeklyStats
@@ -662,37 +673,66 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
         </SectionCard>
 
         {/* ── 6. Local Today ── */}
-        <SectionCard id="local" icon="⊙" title="Local Today" defaultOpen={false}>
+        <SectionCard id="local" icon="⊙" title="Local Today" defaultOpen>
           {(() => {
-            const alerts = dashboard?.localToday?.alerts || []
+            const alerts    = dashboard?.localToday?.alerts || []
             const advisories = dashboard?.localToday?.advisories || []
+            const disrupted  = alerts.filter(a => a.severity !== 'normal')
+            const normalLines = alerts.filter(a => a.severity === 'normal')
+
+            const severityIcon = (s: string) =>
+              s === 'major' ? '🔴' : s === 'minor' ? '🟡' : s === 'personal' ? '⭐' : 'ℹ️'
+
+            const tagClass = (s?: string | null) =>
+              s === 'major' ? 'local-row__tag--major'
+              : s === 'minor' ? 'local-row__tag--minor'
+              : s === 'personal' ? 'local-row__tag--personal'
+              : 'local-row__tag--info'
+
             if (!loading && alerts.length === 0 && advisories.length === 0) {
-              return <div className="local-empty">No local alerts or advisories.</div>
+              return <div className="local-empty">All clear — no alerts today.</div>
             }
+
             return (
               <>
-                {alerts.map(alert => (
-                  <div key={alert.id} className="local-row">
-                    <span className="local-row__icon">
-                      {alert.severity === 'major' ? '▲' : alert.severity === 'minor' ? '△' : '◻'}
-                    </span>
-                    <div className="local-row__body">
-                      <div className="local-row__title">{alert.line}: {alert.title}</div>
-                      {alert.detail && <div className="local-row__detail">{alert.detail}</div>}
-                    </div>
-                    <span className="local-row__tag">Transit</span>
-                  </div>
-                ))}
+                {/* Weather advisories first */}
                 {advisories.map((adv, i) => (
-                  <div key={i} className="local-row">
-                    <span className="local-row__icon">☁</span>
+                  <div key={`adv-${i}`} className={`local-row${adv.severity === 'major' ? ' local-row--major' : adv.severity === 'personal' ? ' local-row--personal' : ''}`}>
+                    <span className="local-row__icon">{adv.icon || severityIcon(adv.severity || 'info')}</span>
                     <div className="local-row__body">
                       <div className="local-row__title">{adv.title}</div>
-                      <div className="local-row__detail">{adv.detail}</div>
+                      {adv.detail && <div className="local-row__detail">{adv.detail}</div>}
                     </div>
-                    <span className="local-row__tag">Weather</span>
+                    <span className={`local-row__tag ${tagClass(adv.severity)}`}>
+                      {adv.severity === 'personal' ? 'Personal' : adv.severity === 'info' ? 'Info' : adv.severity === 'major' ? 'Alert' : 'Notice'}
+                    </span>
                   </div>
                 ))}
+
+                {/* Disrupted transit lines */}
+                {disrupted.map(alert => (
+                  <div key={alert.id} className={`local-row${alert.severity === 'major' ? ' local-row--major' : ' local-row--minor'}`}>
+                    <span className="local-row__icon">🚆</span>
+                    <div className="local-row__body">
+                      <div className="local-row__title"><strong>{alert.line}</strong> · {alert.title}</div>
+                      {alert.detail && <div className="local-row__detail">{alert.detail}</div>}
+                    </div>
+                    <span className={`local-row__tag ${tagClass(alert.severity)}`}>Transit</span>
+                  </div>
+                ))}
+
+                {/* Normal transit lines — collapsed into one row */}
+                {normalLines.length > 0 && (
+                  <div className="local-row local-row--normal">
+                    <span className="local-row__icon">🟢</span>
+                    <div className="local-row__body">
+                      <div className="local-row__title">
+                        Normal service · {normalLines.map(a => a.line).join(', ')}
+                      </div>
+                    </div>
+                    <span className="local-row__tag local-row__tag--info">Transit</span>
+                  </div>
+                )}
               </>
             )
           })()}
