@@ -88,8 +88,10 @@ def _fetch_weather() -> dict:
     temps = hourly.get("temperature_2m", [])
     precips = hourly.get("precipitation", [])
 
-    from datetime import datetime, timezone as tz
-    now_utc = datetime.now(tz.utc)
+    from datetime import datetime
+    # Open-Meteo returns naive local times (no timezone suffix) — compare against
+    # naive local now to avoid the offset-naive vs offset-aware TypeError
+    now_local = datetime.now()
     hourly_strip = []
     for i, t in enumerate(times[:48]):
         try:
@@ -97,7 +99,7 @@ def _fetch_weather() -> dict:
         except ValueError:
             continue
         # Only include upcoming hours (next 24)
-        if dt < now_utc:
+        if dt < now_local:
             continue
         hourly_strip.append({
             "hour": dt.strftime("%H:%M"),
