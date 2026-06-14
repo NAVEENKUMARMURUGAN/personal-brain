@@ -284,7 +284,7 @@ def schedule_reminder(chat_id: int | str, text: str, run_at: datetime):
 
 
 async def _send_reminder(chat_id: int | str, text: str):
-    await send_message(chat_id, f"Reminder: {text}")
+    await send_message(chat_id, text)
 
 
 # ── Response formatting for Telegram ──────────────────────────
