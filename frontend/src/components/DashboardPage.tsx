@@ -61,6 +61,47 @@ function timeAgo(iso?: string | null): string {
   } catch { return '' }
 }
 
+/** Map weather data → a single expressive emoji */
+function weatherIcon(tempC: number, rainProb: number, condition: string): string {
+  const c = condition.toLowerCase()
+  if (c.includes('thunder'))                         return '⛈'
+  if (c.includes('snow') || c.includes('blizzard'))  return '❄️'
+  if (c.includes('heavy rain') || rainProb > 75)     return '🌧'
+  if (c.includes('rain') || c.includes('shower') || rainProb > 50) return '🌦'
+  if (c.includes('drizzle'))                         return '🌧'
+  if (c.includes('fog'))                             return '🌫'
+  if (c.includes('overcast') || c.includes('cloudy')) return '☁️'
+  if (c.includes('partly'))                          return '⛅'
+  if (c.includes('mainly clear') || c.includes('mostly clear')) return '🌤'
+  if (c.includes('clear') && tempC >= 30)            return '☀️'
+  if (c.includes('clear'))                           return '🌤'
+  if (tempC >= 35)                                   return '🥵'
+  if (tempC >= 30)                                   return '☀️'
+  if (tempC >= 22)                                   return '🌤'
+  if (tempC <= 0)                                    return '🥶'
+  if (tempC <= 8)                                    return '🧊'
+  return '⛅'
+}
+
+/** Describe temp in plain words with colour class */
+function tempFeel(tempC: number): { label: string; cls: string } {
+  if (tempC >= 35) return { label: 'scorching', cls: 'weather-feel--hot' }
+  if (tempC >= 30) return { label: 'hot',        cls: 'weather-feel--hot' }
+  if (tempC >= 24) return { label: 'warm',       cls: 'weather-feel--warm' }
+  if (tempC >= 18) return { label: 'mild',       cls: 'weather-feel--mild' }
+  if (tempC >= 12) return { label: 'cool',       cls: 'weather-feel--cool' }
+  if (tempC >= 5)  return { label: 'cold',       cls: 'weather-feel--cold' }
+  return               { label: 'freezing',   cls: 'weather-feel--cold' }
+}
+
+/** Emoji for each hourly slot based on rain amount */
+function hourlyIcon(rainMm: number, tempC: number): string {
+  if (rainMm > 3)  return '🌧'
+  if (rainMm > 0.5) return '🌦'
+  if (tempC >= 28) return '☀️'
+  return '🌤'
+}
+
 function greeting(name: string): string {
   const h = new Date().getHours()
   if (h < 12) return `Good morning, ${name}.`
@@ -380,19 +421,29 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
         <div>
           <div className="context-strip">
             {/* Weather chip */}
-            {dashboard?.weather && (
-              <div
-                className={`chip${weatherExpanded ? ' chip--expanded' : ''}`}
-                onClick={() => setWeatherExpanded(e => !e)}
-              >
-                <span className="chip__icon">
-                  {(dashboard.weather.rainProbability || 0) > 60 ? '🌧' : '☁'}
-                </span>
-                <span className="chip__label">
-                  {dashboard.weather.tempC}°C · {dashboard.weather.rainProbability}% rain
-                </span>
-              </div>
-            )}
+            {dashboard?.weather && (() => {
+              const { tempC, rainProbability, condition } = dashboard.weather
+              const icon = weatherIcon(tempC, rainProbability, condition)
+              const feel = tempFeel(tempC)
+              return (
+                <div
+                  className={`chip chip--weather${weatherExpanded ? ' chip--expanded' : ''}`}
+                  onClick={() => setWeatherExpanded(e => !e)}
+                  title={condition}
+                >
+                  <span className="chip__icon chip__icon--weather">{icon}</span>
+                  <span className="chip__label">
+                    <span className={`weather-temp ${feel.cls}`}>{tempC}°C</span>
+                    <span className="weather-sep">·</span>
+                    {rainProbability > 0
+                      ? <span className="weather-rain">{rainProbability > 60 ? '🌧' : '💧'} {rainProbability}%</span>
+                      : <span className="weather-clear">☀️ dry</span>
+                    }
+                    <span className={`weather-feel ${feel.cls}`}>{feel.label}</span>
+                  </span>
+                </div>
+              )
+            })()}
 
             {/* Transit chip */}
             {dashboard?.transit && (
@@ -436,12 +487,14 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
           {/* Inline weather expand */}
           {weatherExpanded && dashboard?.weather?.hourly && (
             <div className="chip-expand" style={{ marginTop: 8 }}>
+              <div className="chip-expand__label">{dashboard.weather.condition}</div>
               <div className="hourly-strip">
                 {dashboard.weather.hourly.map((h, i) => (
                   <div key={i} className="hourly-item">
                     <div className="hourly-item__time">{h.hour}</div>
-                    <div className="hourly-item__temp">{h.tempC}°</div>
-                    {h.rainMm > 0 && <div className="hourly-item__rain">{h.rainMm}mm</div>}
+                    <div className="hourly-item__icon">{hourlyIcon(h.rainMm, h.tempC)}</div>
+                    <div className={`hourly-item__temp ${tempFeel(h.tempC).cls}`}>{h.tempC}°</div>
+                    {h.rainMm > 0.1 && <div className="hourly-item__rain">{h.rainMm}mm</div>}
                   </div>
                 ))}
               </div>
