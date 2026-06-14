@@ -156,6 +156,34 @@ TOOLS = [
         },
     },
     {
+        "name": "set_task_reminder",
+        "description": (
+            "Schedule a Telegram reminder for a specific task or message at a given time. "
+            "Use when the user says 'remind me', 'ping me at', 'alert me when', 'set a reminder'. "
+            "Examples: 'remind me to call John at 3pm', 'ping me about the deploy at 17:30', "
+            "'set a reminder for standup at 9am tomorrow'. "
+            "Only works if the user has Telegram linked. If not linked, tell them to connect Telegram in Settings."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "The reminder text to send, e.g. 'Time to call John!' or 'Deploy the backend now'",
+                },
+                "remind_at": {
+                    "type": "string",
+                    "description": (
+                        "ISO 8601 datetime when to send the reminder, e.g. '2026-06-14T15:00:00'. "
+                        "Resolve relative times like 'at 3pm', 'in 2 hours', 'tomorrow at 9am' "
+                        "using TODAY from the system prompt. Always use the user's local date."
+                    ),
+                },
+            },
+            "required": ["message", "remind_at"],
+        },
+    },
+    {
         "name": "save_vault_item",
         "description": (
             "Save a SENSITIVE credential or secret to the encrypted vault. "
@@ -314,6 +342,7 @@ You have access to tools to:
 1. Save and search the user's personal knowledge base
 2. Manage their daily tasks (add, complete, carry forward, review)
 3. Save and retrieve sensitive secrets in an encrypted vault (passwords, account numbers, PINs, API keys)
+4. Set Telegram reminders for specific tasks or messages at a given time
 
 TODAY: {today}
 
@@ -355,6 +384,12 @@ PLAN MY DAY — when the user asks to plan their day:
   lunch break, afternoon block, evening. Factor in weather and transit warnings.
 - Prioritise overdue tasks first, then due-today, then inbox.
 - Keep it concise — one short paragraph or a simple time-blocked list.
+
+REMINDERS (Telegram notifications at a specific time):
+- "remind me to X at Y", "ping me about X at Y", "set a reminder for X" → set_task_reminder
+- Resolve relative times ('at 3pm', 'in 2 hours', 'tomorrow 9am') using TODAY in the system prompt
+- If Telegram not linked, tell the user to connect it in Settings
+- Confirm the exact time back to the user after setting
 
 VAULT (encrypted secrets — passwords, account numbers, PINs, API keys, cards):
 - "save my X password", "store my account number", "vault my PIN" → save_vault_item
@@ -454,6 +489,66 @@ def _execute_tool(name: str, inputs: dict, today: str, user_id: str) -> tuple[st
                 return "No knowledge categories yet.", {"type": "categories", "categories": []}
             lines = [f"- {c['icon']} {c['name']} ({c['count']} items)" for c in cats]
             return "\n".join(lines), {"type": "categories", "categories": cats}
+
+        elif name == "set_task_reminder":
+            import telegram_bot
+            import sqlite3 as _sqlite3
+            from datetime import datetime as _dt
+
+            message    = inputs.get("message", "").strip()
+            remind_at  = inputs.get("remind_at", "").strip()
+
+            if not message or not remind_at:
+                return "Please provide both a reminder message and a time.", {}
+
+            # Parse the datetime
+            try:
+                # Try ISO 8601 first
+                remind_dt = _dt.fromisoformat(remind_at)
+                if remind_dt.tzinfo is None:
+                    # Treat as UTC if no tz provided
+                    from datetime import timezone as _tz
+                    remind_dt = remind_dt.replace(tzinfo=_tz.utc)
+            except ValueError:
+                return f"Could not parse reminder time '{remind_at}'. Please use a format like '2026-06-14T15:00:00'.", {}
+
+            now = _dt.now(remind_dt.tzinfo)
+            if remind_dt <= now:
+                return "The reminder time is in the past. Please choose a future time.", {}
+
+            # Find the user's linked Telegram chat_id
+            sqlite_path = os.getenv("SQLITE_PATH", "/app/history.db")
+            try:
+                conn = _sqlite3.connect(sqlite_path)
+                conn.row_factory = _sqlite3.Row
+                row = conn.execute(
+                    "SELECT telegram_id, first_name FROM telegram_users WHERE user_id = ? OR linked_google_user_id = ?",
+                    (user_id, user_id)
+                ).fetchone()
+                conn.close()
+            except Exception as e:
+                return f"Could not look up your Telegram link: {e}", {}
+
+            if not row:
+                return (
+                    "You don't have Telegram linked yet. "
+                    "Go to Settings → Telegram Integration to connect your account, "
+                    "then I can send you reminders there.",
+                    {}
+                )
+
+            telegram_id = row["telegram_id"]
+            first_name  = row["first_name"] or "there"
+            reminder_text = f"⏰ *Reminder, {first_name}!*\n\n{message}"
+
+            telegram_bot.schedule_reminder(telegram_id, reminder_text, remind_dt)
+
+            # Format a friendly confirmation time
+            friendly = remind_dt.strftime("%A, %B %-d at %-I:%M %p")
+            return (
+                f"Reminder set! I'll ping you on Telegram on {friendly}: \"{message}\"",
+                {"type": "reminder_set", "remind_at": remind_at, "message": message}
+            )
 
         elif name == "save_vault_item":
             import vault as vault_module

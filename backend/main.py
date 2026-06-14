@@ -209,6 +209,18 @@ def _register_dashboard_pipelines() -> None:
     # Transit also polls every 10 min during operating hours (05:00–23:00)
     _add(transit.run_pipeline,   IntervalTrigger(minutes=10),    "dashboard_transit_poll")
 
+    # ── Telegram task reminders ────────────────────────────────
+    from pipelines.reminders import send_due_today_brief, send_overdue_alerts
+
+    # 08:00 — due-today morning brief for all linked users
+    _add(send_due_today_brief, CronTrigger(hour=8,  minute=0),  "reminders_due_today")
+
+    # 09:00 — overdue task alert for all linked users with overdue items
+    _add(send_overdue_alerts,  CronTrigger(hour=9,  minute=0),  "reminders_overdue")
+
+    # 17:00 — second overdue nudge (afternoon) for items still not done
+    _add(send_overdue_alerts,  CronTrigger(hour=17, minute=0),  "reminders_overdue_afternoon")
+
 
 @app.get("/health")
 async def health():
