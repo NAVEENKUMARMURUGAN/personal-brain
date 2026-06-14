@@ -792,7 +792,65 @@ def _local_now() -> datetime:
         return datetime.now(timezone.utc)
 
 
-async def process_message(ctx: ContextManager, user_id: str) -> dict:
+def _build_attachment_blocks(attachments: list[dict]) -> list[dict]:
+    """
+    Convert attachment dicts {name, mimeType, data} to Anthropic content blocks.
+    - Images → {"type": "image", "source": {"type": "base64", ...}}
+    - PDFs   → {"type": "document", "source": {"type": "base64", ...}}  (Claude 3.5+ native PDF)
+    - TXT/other docs → extract text, prepend as a text block
+    """
+    blocks = []
+    for att in attachments:
+        mime = att.get("mimeType", "")
+        name = att.get("name", "file")
+        data = att.get("data", "")  # already base64
+
+        if mime.startswith("image/"):
+            blocks.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": mime, "data": data},
+            })
+            blocks.append({"type": "text", "text": f"[Image: {name}]"})
+
+        elif mime == "application/pdf":
+            # Claude 3.5 Sonnet supports native PDF via document block
+            blocks.append({
+                "type": "document",
+                "source": {"type": "base64", "media_type": "application/pdf", "data": data},
+            })
+            blocks.append({"type": "text", "text": f"[Document: {name}]"})
+
+        else:
+            # Plain text, DOCX, etc. — decode base64 and insert as text
+            try:
+                import base64 as _b64
+                raw_bytes = _b64.b64decode(data)
+                if mime in ("text/plain",):
+                    text_content = raw_bytes.decode("utf-8", errors="replace")
+                else:
+                    # Try to extract text from DOCX via python-docx if available
+                    try:
+                        import io, zipfile
+                        if zipfile.is_zipfile(io.BytesIO(raw_bytes)):
+                            from docx import Document as DocxDoc
+                            doc = DocxDoc(io.BytesIO(raw_bytes))
+                            text_content = "\n".join(p.text for p in doc.paragraphs if p.text)
+                        else:
+                            text_content = raw_bytes.decode("utf-8", errors="replace")
+                    except Exception:
+                        text_content = raw_bytes.decode("utf-8", errors="replace")
+                blocks.append({
+                    "type": "text",
+                    "text": f"[Document: {name}]\n\n{text_content[:20000]}",
+                })
+            except Exception as e:
+                logger.warning("Could not decode attachment %s: %s", name, e)
+                blocks.append({"type": "text", "text": f"[Attachment: {name} — could not read]"})
+
+    return blocks
+
+
+async def process_message(ctx: ContextManager, user_id: str, attachments: list[dict] | None = None) -> dict:
     local_now = _local_now()
     today = local_now.date().isoformat()
     # e.g. "2026-06-15T16:45:00+10:00"
@@ -807,7 +865,20 @@ async def process_message(ctx: ContextManager, user_id: str) -> dict:
         relevant_memories="\n".join(f"- [{m['category']}] {m['content']}" for m in ctx.relevant_memories) or "(none)",
     )
 
-    messages       = ctx.to_messages()
+    messages = ctx.to_messages()
+
+    # Inject attachment blocks into the last (current) user message
+    if attachments:
+        att_blocks = _build_attachment_blocks(attachments)
+        if att_blocks and messages:
+            last = messages[-1]
+            # Convert string content to multimodal list
+            text_content = last["content"] if isinstance(last["content"], str) else ""
+            messages[-1] = {
+                "role": "user",
+                "content": att_blocks + [{"type": "text", "text": text_content}],
+            }
+
     tool_calls_log: list[dict] = []
 
     try:

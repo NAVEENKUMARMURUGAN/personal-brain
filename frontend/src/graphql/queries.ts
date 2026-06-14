@@ -1,8 +1,8 @@
 import { gql } from '@apollo/client'
 
 export const SEND_MESSAGE = gql`
-  mutation Send($content: String!, $clearedAt: String) {
-    send(content: $content, clearedAt: $clearedAt) {
+  mutation Send($content: String!, $clearedAt: String, $attachments: [AttachmentInput]) {
+    send(content: $content, clearedAt: $clearedAt, attachments: $attachments) {
       answer
       type
       action

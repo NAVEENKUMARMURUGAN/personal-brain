@@ -114,9 +114,27 @@ export default function MessageRenderer({ message, onDrill, onCompleteTask }: Me
   const isUser = message.role === 'user'
 
   if (isUser) {
+    const userPayload = parsePayload(message.payload) as { attachments?: Array<{ name: string; previewUrl?: string }> } | null
+    const attachments = userPayload?.attachments ?? []
     return (
       <div className="msg msg--user">
-        <div className="msg__bubble msg__bubble--user">{message.content}</div>
+        <div className="msg__bubble msg__bubble--user">
+          {attachments.length > 0 && (
+            <div className="msg__attachments">
+              {attachments.map((att, i) => (
+                <div key={i} className="msg__attachment">
+                  {att.previewUrl
+                    ? <img src={att.previewUrl} alt={att.name} className="msg__attachment-img" />
+                    : <span className="msg__attachment-doc">📄 {att.name}</span>
+                  }
+                </div>
+              ))}
+            </div>
+          )}
+          {message.content && message.content !== '📎' && (
+            <span>{message.content}</span>
+          )}
+        </div>
       </div>
     )
   }

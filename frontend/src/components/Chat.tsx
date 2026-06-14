@@ -13,6 +13,13 @@ function localId() {
 
 type RecordingState = 'idle' | 'recording' | 'transcribing'
 
+interface Attachment {
+  name: string
+  mimeType: string
+  data: string        // base64
+  previewUrl?: string // only for images
+}
+
 interface ChatProps {
   onDrillCategory: (category: string) => void
   onAgentAction?: (action: string, detail?: string) => void
@@ -33,9 +40,11 @@ export default function Chat({ onDrillCategory, onAgentAction, initialMessage, o
   )
   const [recordingState, setRecordingState] = useState<RecordingState>('idle')
   const [showUpload, setShowUpload] = useState(false)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const initialMessageHandled = useRef(false)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
@@ -142,22 +151,57 @@ export default function Chat({ onDrillCategory, onAgentAction, initialMessage, o
     }
   }, [completeTaskMutation])
 
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    if (!files.length) return
+    const toAdd: Attachment[] = await Promise.all(files.map(file => new Promise<Attachment>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result as string
+        // dataUrl = "data:<mime>;base64,<data>"
+        const [meta, data] = dataUrl.split(',')
+        const mimeType = meta.replace('data:', '').replace(';base64', '')
+        resolve({
+          name: file.name,
+          mimeType,
+          data,
+          previewUrl: mimeType.startsWith('image/') ? dataUrl : undefined,
+        })
+      }
+      reader.readAsDataURL(file)
+    })))
+    setAttachments(prev => [...prev, ...toAdd])
+    // Reset input so same file can be re-added
+    e.target.value = ''
+  }, [])
+
+  const removeAttachment = useCallback((index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index))
+  }, [])
+
   const handleSend = useCallback(async (overrideContent?: string) => {
     const content = (overrideContent ?? input).trim()
-    if (!content || loading) return
+    if ((!content && attachments.length === 0) || loading) return
 
+    const sentAttachments = [...attachments]
     setMessages((prev) => [...prev, {
-      id: localId(), content, type: 'text', role: 'user',
-      payload: null, createdAt: new Date().toISOString(),
+      id: localId(), content: content || '📎', type: 'text', role: 'user',
+      payload: sentAttachments.length ? JSON.stringify({ attachments: sentAttachments.map(a => ({ name: a.name, previewUrl: a.previewUrl })) }) : null,
+      createdAt: new Date().toISOString(),
     }])
     setInput('')
+    setAttachments([])
     setLoading(true)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
 
     try {
-      const result = await sendMutation({ variables: { content, clearedAt } })
+      const variables: Record<string, unknown> = { content: content || '(see attachment)', clearedAt }
+      if (sentAttachments.length) {
+        variables.attachments = sentAttachments.map(({ name, mimeType, data }) => ({ name, mimeType, data }))
+      }
+      const result = await sendMutation({ variables })
       const resp = result.data?.send
       if (resp) {
         setMessages((prev) => [...prev, {
@@ -334,6 +378,22 @@ export default function Chat({ onDrillCategory, onAgentAction, initialMessage, o
       </div>
 
       <div className="chat__input-bar">
+        {/* Attachment previews */}
+        {attachments.length > 0 && (
+          <div className="chat__attachments">
+            {attachments.map((att, i) => (
+              <div key={i} className="chat__attachment-chip">
+                {att.previewUrl
+                  ? <img src={att.previewUrl} className="chat__attachment-thumb" alt={att.name} />
+                  : <span className="chat__attachment-icon">📄</span>
+                }
+                <span className="chat__attachment-name">{att.name}</span>
+                <button className="chat__attachment-remove" onClick={() => removeAttachment(i)}>✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="chat__input-inner">
           <button
             className="chat__input-icon-btn"
@@ -342,12 +402,30 @@ export default function Chat({ onDrillCategory, onAgentAction, initialMessage, o
           >
             ⬡
           </button>
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf,text/plain,.docx,.doc"
+            multiple
+            className="chat__file-input"
+            onChange={handleFileChange}
+          />
+          <button
+            className="chat__input-icon-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={loading}
+            title="Attach image or document (JPG, PNG, PDF, TXT)"
+            aria-label="Attach file"
+          >
+            📎
+          </button>
           <button
             className="chat__input-icon-btn"
             onClick={() => setShowUpload(true)}
             disabled={loading}
-            title="Upload file (PDF, DOCX, XLSX, TXT)"
-            aria-label="Upload file"
+            title="Save document to knowledge base (PDF, DOCX, XLSX, TXT)"
+            aria-label="Save to brain"
           >
             +
           </button>
@@ -360,6 +438,7 @@ export default function Chat({ onDrillCategory, onAgentAction, initialMessage, o
             placeholder={
               recordingState === 'recording' ? 'Recording… click ⏹ to stop' :
               recordingState === 'transcribing' ? 'Transcribing…' :
+              attachments.length > 0 ? 'Add a message or send attachment…' :
               'Type a command or ask anything...'
             }
             rows={1}
@@ -377,7 +456,7 @@ export default function Chat({ onDrillCategory, onAgentAction, initialMessage, o
           <button
             className="chat__kbd-btn"
             onClick={() => handleSend()}
-            disabled={loading || !input.trim() || recordingState !== 'idle'}
+            disabled={loading || (!input.trim() && attachments.length === 0) || recordingState !== 'idle'}
             title="Send (Enter)"
           >
             ⌘K

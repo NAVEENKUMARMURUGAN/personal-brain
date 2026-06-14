@@ -26,8 +26,14 @@ type Query {
   memories(category: String, limit: Int, cursor: String): MemoriesPage
 }
 
+input AttachmentInput {
+  name: String!
+  mimeType: String!
+  data: String!
+}
+
 type Mutation {
-  send(content: String!, clearedAt: String): BrainResponse
+  send(content: String!, clearedAt: String, attachments: [AttachmentInput]): BrainResponse
   addTask(content: String!, date: String): Task
   editTask(taskId: String!, content: String!): Task
   deleteTask(taskId: String!): Boolean
@@ -411,8 +417,9 @@ async def _handle_send(variables: dict, user_id: str) -> dict:
     if not content:
         return _err("content is required")
 
-    cleared_at = variables.get("clearedAt") or None
-    today      = datetime.now(timezone.utc).date().isoformat()
+    cleared_at  = variables.get("clearedAt") or None
+    attachments = variables.get("attachments") or []
+    today       = datetime.now(timezone.utc).date().isoformat()
 
     history.save_message(str(uuid.uuid4()), content, "user", "text", None, user_id=user_id)
 
@@ -421,7 +428,7 @@ async def _handle_send(variables: dict, user_id: str) -> dict:
     )
     logger.debug("\n%s", ctx.debug())
 
-    response = await claude.process_message(ctx, user_id=user_id)
+    response = await claude.process_message(ctx, user_id=user_id, attachments=attachments)
 
     history.save_message(
         str(uuid.uuid4()), response["answer"], "assistant",
