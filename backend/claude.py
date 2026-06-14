@@ -155,6 +155,85 @@ TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "save_vault_item",
+        "description": (
+            "Save a SENSITIVE credential or secret to the encrypted vault. "
+            "Use this when the user wants to store a password, account number, PIN, API key, "
+            "credit card number, passport number, or any other secret. "
+            "Examples: 'save my Netflix password', 'store my bank account number', "
+            "'remember my SSH key passphrase', 'vault my credit card'. "
+            "The secret is encrypted with AES-256-GCM and NEVER stored in plain text. "
+            "Do NOT use save_knowledge for sensitive secrets — always use this tool instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string",
+                    "description": "Short descriptive name, e.g. 'Netflix password', 'Bank of Sydney account number', 'AWS root API key'",
+                },
+                "secret": {
+                    "type": "string",
+                    "description": "The actual secret value to encrypt and store",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "Category: 'Passwords', 'Banking', 'API Keys', 'Cards', 'Identity Documents', 'PIN Codes', or 'Other'",
+                    "default": "Passwords",
+                },
+                "notes": {
+                    "type": "string",
+                    "description": "Optional additional context, e.g. 'username: john@example.com', 'expires 2027-06'",
+                    "default": "",
+                },
+            },
+            "required": ["label", "secret"],
+        },
+    },
+    {
+        "name": "search_vault",
+        "description": (
+            "Search the encrypted vault for a stored credential or secret. "
+            "Use this when the user asks to retrieve a password, account number, PIN, "
+            "API key, or any secret they previously stored. "
+            "Examples: 'what is my Netflix password?', 'show my bank account', "
+            "'what API key did I save for GitHub?'. "
+            "Always confirms the user's intent before displaying secrets."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "What to search for, e.g. 'Netflix password', 'bank account', 'GitHub API key'",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "delete_vault_item",
+        "description": (
+            "Delete a credential from the encrypted vault. "
+            "Use only when the user explicitly says to delete or remove a saved secret. "
+            "First call search_vault to find the item ID, then call this to delete it."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_id": {
+                    "type": "string",
+                    "description": "The UUID of the vault item to delete",
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Label of the item being deleted (for confirmation message)",
+                },
+            },
+            "required": ["item_id", "label"],
+        },
+    },
 ]
 
 # ─────────────────────────────────────────────────────────────
@@ -234,6 +313,7 @@ You are Personal Brain — a personal knowledge and task management assistant.
 You have access to tools to:
 1. Save and search the user's personal knowledge base
 2. Manage their daily tasks (add, complete, carry forward, review)
+3. Save and retrieve sensitive secrets in an encrypted vault (passwords, account numbers, PINs, API keys)
 
 TODAY: {today}
 
@@ -275,6 +355,14 @@ PLAN MY DAY — when the user asks to plan their day:
   lunch break, afternoon block, evening. Factor in weather and transit warnings.
 - Prioritise overdue tasks first, then due-today, then inbox.
 - Keep it concise — one short paragraph or a simple time-blocked list.
+
+VAULT (encrypted secrets — passwords, account numbers, PINs, API keys, cards):
+- "save my X password", "store my account number", "vault my PIN" → save_vault_item
+- "what is my X password?", "show my bank account", "get my API key" → search_vault
+- "delete my X from vault", "remove my password" → search_vault THEN delete_vault_item
+- NEVER use save_knowledge for passwords or secrets — always use save_vault_item
+- When displaying vault results: show the secret clearly, the user asked for it
+- Vault is AES-256-GCM encrypted — assure the user their secrets are safe
 
 CRITICAL rules:
 - get_tasks returns the FULL list — only call it when the user wants to see everything.
@@ -366,6 +454,52 @@ def _execute_tool(name: str, inputs: dict, today: str, user_id: str) -> tuple[st
                 return "No knowledge categories yet.", {"type": "categories", "categories": []}
             lines = [f"- {c['icon']} {c['name']} ({c['count']} items)" for c in cats]
             return "\n".join(lines), {"type": "categories", "categories": cats}
+
+        elif name == "save_vault_item":
+            import vault as vault_module
+            label    = inputs["label"]
+            secret   = inputs["secret"]
+            category = inputs.get("category", "Passwords")
+            notes    = inputs.get("notes", "")
+            try:
+                item = vault_module.save_item(user_id, label, secret, category, notes)
+                return (
+                    f"Saved '{label}' to your encrypted vault under '{category}'. "
+                    f"It's protected with AES-256-GCM encryption and only accessible by you.",
+                    {"type": "vault_saved", "item": item},
+                )
+            except RuntimeError as e:
+                return f"Vault error: {e}", {"error": str(e)}
+
+        elif name == "search_vault":
+            import vault as vault_module
+            query = inputs["query"]
+            try:
+                items = vault_module.search_items(user_id, query, limit=5)
+                if not items:
+                    return f"No vault items found matching '{query}'.", {"type": "vault_search", "items": []}
+                lines = []
+                for it in items:
+                    lines.append(f"🔐 {it['label']} ({it['category']})")
+                    lines.append(f"   Secret: {it['secret']}")
+                    if it.get("notes"):
+                        lines.append(f"   Notes:  {it['notes']}")
+                    lines.append(f"   ID: {it['id']}")
+                return "\n".join(lines), {"type": "vault_search", "items": items}
+            except RuntimeError as e:
+                return f"Vault error: {e}", {"error": str(e)}
+
+        elif name == "delete_vault_item":
+            import vault as vault_module
+            item_id = inputs["item_id"]
+            label   = inputs.get("label", "item")
+            try:
+                ok = vault_module.delete_item(user_id, item_id)
+                if ok:
+                    return f"Deleted '{label}' from your vault.", {"type": "vault_deleted", "item_id": item_id}
+                return f"Could not find '{label}' in your vault.", {"type": "vault_deleted", "item_id": None}
+            except RuntimeError as e:
+                return f"Vault error: {e}", {"error": str(e)}
 
         else:
             return f"Unknown tool: {name}", {}

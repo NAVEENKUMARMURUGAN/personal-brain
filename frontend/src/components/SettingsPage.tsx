@@ -1,6 +1,33 @@
 import React, { useEffect, useState, useCallback } from 'react'
+import { useQuery, useMutation, gql } from '@apollo/client'
 import { useAuth } from '../AuthContext'
 import { API_URL } from '../config'
+
+// ── Vault GraphQL ──────────────────────────────────────────────
+const GET_VAULT_ITEMS = gql`
+  query GetVaultItems {
+    vaultItems { id label category createdAt }
+  }
+`
+const SEARCH_VAULT = gql`
+  query SearchVault($query: String!) {
+    searchVault(query: $query) { id label secret notes category createdAt }
+  }
+`
+const SAVE_VAULT_ITEM = gql`
+  mutation SaveVaultItem($label: String!, $secret: String!, $category: String, $notes: String) {
+    saveVaultItem(label: $label, secret: $secret, category: $category, notes: $notes) {
+      id label category createdAt
+    }
+  }
+`
+const DELETE_VAULT_ITEM = gql`
+  mutation DeleteVaultItem($itemId: ID!) {
+    deleteVaultItem(itemId: $itemId)
+  }
+`
+
+const VAULT_CATEGORIES = ['Passwords', 'Banking', 'API Keys', 'Cards', 'Identity Documents', 'PIN Codes', 'Other']
 
 interface TelegramStatus {
   linked: boolean
@@ -214,7 +241,7 @@ export default function SettingsPage() {
 
       {/* How to use Telegram section */}
       {telegramStatus?.linked && (
-        <section>
+        <section style={{ marginBottom: '32px' }}>
           <div style={{ fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: '12px' }}>
             Using Telegram
           </div>
@@ -227,6 +254,160 @@ export default function SettingsPage() {
           </div>
         </section>
       )}
+
+      {/* Vault section */}
+      <VaultSection />
     </div>
+  )
+}
+
+// ── Vault Section Component ────────────────────────────────────
+function VaultSection() {
+  const [showAdd, setShowAdd]         = useState(false)
+  const [newLabel, setNewLabel]       = useState('')
+  const [newSecret, setNewSecret]     = useState('')
+  const [newCategory, setNewCategory] = useState('Passwords')
+  const [newNotes, setNewNotes]       = useState('')
+  const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({})
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searching, setSearching]     = useState(false)
+  const [searchResults, setSearchResults] = useState<any[] | null>(null)
+  const [vaultMsg, setVaultMsg]       = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
+
+  const { data, loading, refetch } = useQuery(GET_VAULT_ITEMS, { fetchPolicy: 'cache-and-network' })
+  const [saveVaultItem, { loading: saving }] = useMutation(SAVE_VAULT_ITEM)
+  const [deleteVaultItem, { loading: deleting }] = useMutation(DELETE_VAULT_ITEM)
+  const [searchVault] = useMutation<any, { query: string }>(gql`
+    mutation SearchVaultMut($query: String!) {
+      searchVault: searchVault(query: $query) { id label secret notes category createdAt }
+    }
+  `, { variables: { query: searchQuery } })
+
+  // Use query instead for search
+  const [doSearch, { loading: searchLoading }] = [
+    async (q: string) => {
+      setSearching(true)
+      try {
+        // We call the query directly
+        const res = await refetch()
+        // Filter client-side for label match as a quick workaround
+        // Real search goes through Apollo query below
+      } finally {
+        setSearching(false)
+      }
+    },
+    { loading: false }
+  ]
+
+  const handleSave = async () => {
+    if (!newLabel.trim() || !newSecret.trim()) {
+      setVaultMsg({ type: 'error', text: 'Label and secret are required.' })
+      return
+    }
+    try {
+      await saveVaultItem({ variables: { label: newLabel.trim(), secret: newSecret.trim(), category: newCategory, notes: newNotes.trim() } })
+      setVaultMsg({ type: 'ok', text: `Saved "${newLabel}" to vault.` })
+      setNewLabel(''); setNewSecret(''); setNewNotes(''); setShowAdd(false)
+      refetch()
+    } catch (e: any) {
+      setVaultMsg({ type: 'error', text: e.message ?? 'Failed to save.' })
+    }
+  }
+
+  const handleDelete = async (id: string, label: string) => {
+    if (!confirm(`Delete "${label}" from vault?`)) return
+    try {
+      await deleteVaultItem({ variables: { itemId: id } })
+      setVaultMsg({ type: 'ok', text: `Deleted "${label}".` })
+      refetch()
+    } catch (e: any) {
+      setVaultMsg({ type: 'error', text: e.message ?? 'Failed to delete.' })
+    }
+  }
+
+  const sectionLabel: React.CSSProperties = { fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', color: 'var(--text-faint)', textTransform: 'uppercase', marginBottom: '12px' }
+  const card: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', padding: '16px' }
+  const inp: React.CSSProperties = { width: '100%', padding: '7px 10px', fontSize: '12px', fontFamily: 'var(--mono-font)', background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: '6px', color: 'var(--text-primary)', outline: 'none', boxSizing: 'border-box' }
+  const btn: React.CSSProperties = { padding: '7px 14px', fontSize: '12px', cursor: 'pointer', border: 'none', borderRadius: '6px', fontFamily: 'var(--mono-font)', fontWeight: 600 }
+
+  const items: any[] = data?.vaultItems ?? []
+
+  return (
+    <section style={{ marginBottom: '32px' }}>
+      <div style={sectionLabel}>🔐 Encrypted Vault</div>
+      <div style={{ ...card, marginBottom: '12px' }}>
+        <div style={{ fontSize: '12px', color: 'var(--text-faint)', marginBottom: '12px', lineHeight: '1.7' }}>
+          Passwords, account numbers, PINs, and API keys stored with AES-256-GCM encryption.
+          Your secrets never leave the server unencrypted. Access them anytime via chat:
+          <span style={{ color: 'var(--accent)' }}> "what is my Netflix password?"</span>
+        </div>
+
+        {/* Add new item */}
+        {!showAdd ? (
+          <button style={{ ...btn, background: 'var(--accent)', color: '#000' }} onClick={() => setShowAdd(true)}>
+            + Add secret
+          </button>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <input style={inp} placeholder="Label (e.g. Netflix password)" value={newLabel} onChange={e => setNewLabel(e.target.value)} />
+            <input style={inp} type="password" placeholder="Secret value" value={newSecret} onChange={e => setNewSecret(e.target.value)} />
+            <select style={inp} value={newCategory} onChange={e => setNewCategory(e.target.value)}>
+              {VAULT_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <input style={inp} placeholder="Notes (optional): e.g. username: john@example.com" value={newNotes} onChange={e => setNewNotes(e.target.value)} />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button style={{ ...btn, background: 'var(--accent)', color: '#000', opacity: saving ? 0.6 : 1 }} onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : 'Save encrypted'}
+              </button>
+              <button style={{ ...btn, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-faint)' }} onClick={() => setShowAdd(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {vaultMsg && (
+          <div style={{ marginTop: '10px', fontSize: '12px', padding: '7px 10px', borderRadius: '6px', background: vaultMsg.type === 'ok' ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)', color: vaultMsg.type === 'ok' ? '#4ade80' : '#f87171', border: `1px solid ${vaultMsg.type === 'ok' ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)'}` }}>
+            {vaultMsg.text}
+          </div>
+        )}
+      </div>
+
+      {/* Item list */}
+      {loading ? (
+        <div style={{ fontSize: '12px', color: 'var(--text-faint)', padding: '12px' }}>Loading vault…</div>
+      ) : items.length === 0 ? (
+        <div style={{ fontSize: '12px', color: 'var(--text-faint)', padding: '12px' }}>No secrets saved yet.</div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+          {items.map(item => (
+            <div key={item.id} style={{ ...card, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{item.label}</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-faint)', marginTop: '2px' }}>
+                  {item.category} · saved {new Date(item.createdAt).toLocaleDateString()}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+                <button
+                  style={{ ...btn, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-faint)', fontSize: '11px', padding: '4px 10px' }}
+                  title="View via chat: ask 'what is my [label]?'"
+                  onClick={() => window.dispatchEvent(new CustomEvent('pb:navigate-chat', { detail: { message: `what is my ${item.label}?` } }))}
+                >
+                  View in chat
+                </button>
+                <button
+                  style={{ ...btn, background: 'transparent', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171', fontSize: '11px', padding: '4px 10px', opacity: deleting ? 0.5 : 1 }}
+                  onClick={() => handleDelete(item.id, item.label)}
+                  disabled={deleting}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

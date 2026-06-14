@@ -114,6 +114,24 @@ extend type Mutation {
   reviewLearningCard(cardId: ID!, result: ReviewResult!): LearningCard!
   triageInboxItem(itemId: ID!, action: TriageAction!): Task!
   refreshBriefing: Briefing!
+  saveVaultItem(label: String!, secret: String!, category: String, notes: String): VaultItem!
+  deleteVaultItem(itemId: ID!): Boolean!
+  updateVaultItem(itemId: ID!, label: String, secret: String, category: String, notes: String): VaultItem!
+}
+
+type VaultItem {
+  id: ID!
+  label: String!
+  secret: String
+  notes: String
+  category: String!
+  createdAt: String
+  updatedAt: String
+}
+
+type Query {
+  vaultItems: [VaultItem!]!
+  searchVault(query: String!): [VaultItem!]!
 }
 
 type Dashboard {
@@ -363,6 +381,18 @@ async def handle(request: Request) -> JSONResponse:
             result = await _handle_triage_inbox_item(variables, user_id)
         elif op_type == "mutation" and field == "refreshBriefing":
             result = await _handle_refresh_briefing(user_id)
+        # ── Vault mutations ────────────────────────────────────
+        elif op_type == "mutation" and field == "saveVaultItem":
+            result = await _handle_save_vault_item(variables, user_id)
+        elif op_type == "mutation" and field == "deleteVaultItem":
+            result = await _handle_delete_vault_item(variables, user_id)
+        elif op_type == "mutation" and field == "updateVaultItem":
+            result = await _handle_update_vault_item(variables, user_id)
+        # ── Vault queries ──────────────────────────────────────
+        elif op_type == "query" and field == "vaultItems":
+            result = await _handle_vault_items(user_id)
+        elif op_type == "query" and field == "searchVault":
+            result = await _handle_search_vault(variables, user_id)
         else:
             logger.error("Unknown operation: op=%s field=%s query=%r", op_type, field, query)
             return JSONResponse(_err(f"Unknown operation: {field}"), status_code=400)
@@ -959,4 +989,106 @@ async def _handle_refresh_briefing(user_id: str) -> dict:
         })
     except Exception as e:
         logger.error("refreshBriefing error: %s", e)
+        return _err(str(e))
+
+
+# ── Vault handlers ─────────────────────────────────────────────────────────────
+
+def _serialize_vault_item(item: dict, include_secret: bool = False) -> dict:
+    """Serialize a vault item for GraphQL response."""
+    return {
+        "id":         item.get("id", ""),
+        "label":      item.get("label", ""),
+        "secret":     item.get("secret", "") if include_secret else None,
+        "notes":      item.get("notes", ""),
+        "category":   item.get("category", "General"),
+        "createdAt":  item.get("created_at", ""),
+        "updatedAt":  item.get("updated_at", ""),
+    }
+
+
+async def _handle_save_vault_item(variables: dict, user_id: str) -> dict:
+    """Save an encrypted vault item."""
+    try:
+        import vault as vault_module
+        label    = variables.get("label", "").strip()
+        secret   = variables.get("secret", "").strip()
+        category = variables.get("category", "Passwords")
+        notes    = variables.get("notes", "")
+        if not label or not secret:
+            return _err("label and secret are required")
+        item = vault_module.save_item(user_id, label, secret, category, notes)
+        return _ok({"saveVaultItem": _serialize_vault_item(item)})
+    except RuntimeError as e:
+        return _err(str(e))
+    except Exception as e:
+        logger.error("saveVaultItem error: %s", e)
+        return _err(str(e))
+
+
+async def _handle_delete_vault_item(variables: dict, user_id: str) -> dict:
+    """Delete a vault item by ID."""
+    try:
+        import vault as vault_module
+        item_id = variables.get("itemId", "")
+        if not item_id:
+            return _err("itemId is required")
+        ok = vault_module.delete_item(user_id, item_id)
+        return _ok({"deleteVaultItem": ok})
+    except RuntimeError as e:
+        return _err(str(e))
+    except Exception as e:
+        logger.error("deleteVaultItem error: %s", e)
+        return _err(str(e))
+
+
+async def _handle_update_vault_item(variables: dict, user_id: str) -> dict:
+    """Update an existing vault item."""
+    try:
+        import vault as vault_module
+        item_id  = variables.get("itemId", "")
+        label    = variables.get("label")
+        secret   = variables.get("secret")
+        category = variables.get("category")
+        notes    = variables.get("notes")
+        if not item_id:
+            return _err("itemId is required")
+        updated = vault_module.update_item(user_id, item_id, label, secret, notes, category)
+        if not updated:
+            return _err("Item not found or access denied")
+        return _ok({"updateVaultItem": _serialize_vault_item(updated)})
+    except RuntimeError as e:
+        return _err(str(e))
+    except Exception as e:
+        logger.error("updateVaultItem error: %s", e)
+        return _err(str(e))
+
+
+async def _handle_vault_items(user_id: str) -> dict:
+    """List all vault items (labels only, no secrets)."""
+    try:
+        import vault as vault_module
+        items = vault_module.list_items(user_id)
+        return _ok({"vaultItems": [_serialize_vault_item(i) for i in items]})
+    except RuntimeError as e:
+        return _err(str(e))
+    except Exception as e:
+        logger.error("vaultItems error: %s", e)
+        return _err(str(e))
+
+
+async def _handle_search_vault(variables: dict, user_id: str) -> dict:
+    """Search vault items and return with decrypted secrets."""
+    try:
+        import vault as vault_module
+        query = variables.get("query", "")
+        if not query:
+            return _err("query is required")
+        items = vault_module.search_items(user_id, query)
+        # Include secret in search results — user explicitly asked to find it
+        return _ok({"searchVault": [_serialize_vault_item(i, include_secret=True) for i in items]})
+    except RuntimeError as e:
+        return _err(str(e))
+    except Exception as e:
+        logger.error("searchVault error: %s", e)
         return _err(str(e))

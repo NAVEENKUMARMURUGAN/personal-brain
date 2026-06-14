@@ -115,6 +115,12 @@ async def startup():
     auth.ensure_users_table()
     telegram_bot.ensure_telegram_table()
     dashboard_db.ensure_dashboard_tables()
+    try:
+        import vault as vault_module
+        vault_module.ensure_collection()
+        logger.info("Vault collection ready")
+    except Exception as e:
+        logger.warning("Vault init skipped (VAULT_SECRET not set or Qdrant unavailable): %s", e)
     telegram_bot.start_scheduler()
     _register_dashboard_pipelines()
     if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("BACKEND_URL"):
