@@ -16,10 +16,11 @@ function isoFromYMD(y: number, m: number, d: number) {
 interface MiniCalendarProps {
   selectedDate: string
   onSelectDate: (iso: string) => void
-  taskDates: Set<string>   // dates that have at least one task
+  taskDates: Set<string>      // dates with at least one regular task
+  reminderDates: Set<string>  // dates with at least one reminder task
 }
 
-function MiniCalendar({ selectedDate, onSelectDate, taskDates }: MiniCalendarProps) {
+function MiniCalendar({ selectedDate, onSelectDate, taskDates, reminderDates }: MiniCalendarProps) {
   const today = todayISO()
   const [viewYear,  setViewYear]  = useState(() => new Date().getFullYear())
   const [viewMonth, setViewMonth] = useState(() => new Date().getMonth())  // 0-based
@@ -80,23 +81,28 @@ function MiniCalendar({ selectedDate, onSelectDate, taskDates }: MiniCalendarPro
         {cells.map((day, idx) => {
           if (!day) return <div key={idx} className="mini-cal__cell mini-cal__cell--empty" />
           const iso  = isoFromYMD(viewYear, viewMonth, day)
-          const isToday    = iso === today
-          const isSelected = iso === selectedDate
-          const hasTasks   = taskDates.has(iso)
+          const isToday      = iso === today
+          const isSelected   = iso === selectedDate
+          const hasTasks     = taskDates.has(iso)
+          const hasReminders = reminderDates.has(iso)
           return (
             <button
               key={iso}
               className={[
                 'mini-cal__cell',
-                isToday    ? 'mini-cal__cell--today'    : '',
-                isSelected ? 'mini-cal__cell--selected' : '',
-                hasTasks   ? 'mini-cal__cell--has-tasks': '',
+                isToday      ? 'mini-cal__cell--today'        : '',
+                isSelected   ? 'mini-cal__cell--selected'     : '',
+                hasTasks     ? 'mini-cal__cell--has-tasks'    : '',
+                hasReminders ? 'mini-cal__cell--has-reminders': '',
               ].join(' ')}
               onClick={() => onSelectDate(iso)}
               title={iso}
             >
               {day}
-              {hasTasks && <span className="mini-cal__dot" />}
+              <span className="mini-cal__dots">
+                {hasTasks     && <span className="mini-cal__dot mini-cal__dot--task" />}
+                {hasReminders && <span className="mini-cal__dot mini-cal__dot--reminder" />}
+              </span>
             </button>
           )
         })}
@@ -176,6 +182,8 @@ function VelocityChart({ data }: { data: number[] }) {
 interface Task {
   id: string; content: string; status: string
   createdDate?: string; completedDate?: string | null; carriedOver?: boolean
+  taskType?: string        // 'task' | 'reminder'
+  reminderTime?: string    // HH:MM — only set for taskType === 'reminder'
 }
 
 interface DateGroup { date: string; pending: Task[]; completed: Task[] }
@@ -213,8 +221,10 @@ function TaskRow({ task, onComplete, onEdit, onDelete, completing, deleting }: T
     setEditing(false)
   }
 
+  const isReminder = task.taskType === 'reminder'
+
   return (
-    <div className={`task-row ${isDone ? 'task-row--done' : ''}`}>
+    <div className={`task-row ${isDone ? 'task-row--done' : ''} ${isReminder ? 'task-row--reminder' : ''}`}>
       <span className="task-row__drag">⠿</span>
 
       {isDone ? (
@@ -265,7 +275,10 @@ function TaskRow({ task, onComplete, onEdit, onDelete, completing, deleting }: T
             </>
           ) : (
             <>
-              <span className="task-row__category">{inferCategory(task.content)}</span>
+              {isReminder
+                ? <span className="task-row__reminder-badge">⏰ reminder{task.reminderTime ? ` · ${task.reminderTime}` : ''}</span>
+                : <span className="task-row__category">{inferCategory(task.content)}</span>
+              }
               {task.carriedOver && <><span className="task-row__dot">·</span><span className="task-row__carried">carried</span></>}
             </>
           )}
@@ -470,13 +483,16 @@ export default function TasksPage() {
     return { date, pending, completed }
   })
 
-  // Build set of dates that have tasks (for calendar dots)
-  const taskDates = useMemo(() => {
-    const s = new Set<string>()
+  // Build sets of dates for calendar dots — regular tasks and reminders get different colours
+  const { taskDates, reminderDates } = useMemo(() => {
+    const t = new Set<string>()
+    const r = new Set<string>()
     groups.forEach(g => {
-      if (g.pending.length > 0 || g.completed.length > 0) s.add(g.date)
+      const allTasks = [...g.pending, ...g.completed]
+      if (allTasks.some(task => task.taskType !== 'reminder')) t.add(g.date)
+      if (allTasks.some(task => task.taskType === 'reminder')) r.add(g.date)
     })
-    return s
+    return { taskDates: t, reminderDates: r }
   }, [groups])
 
   const matchSearch = (t: Task) =>
@@ -696,6 +712,7 @@ export default function TasksPage() {
               setCollapsed(prev => ({ ...prev, [iso]: false }))
             }}
             taskDates={taskDates}
+            reminderDates={reminderDates}
           />
 
           <div className="productivity-panel__title" style={{ marginTop: '20px' }}>PRODUCTIVITY ENGINE</div>

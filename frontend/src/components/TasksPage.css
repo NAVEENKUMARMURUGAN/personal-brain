@@ -538,6 +538,21 @@
   text-transform: uppercase;
 }
 
+/* Reminder task row — amber left-border accent */
+.task-row--reminder {
+  border-left: 2px solid var(--accent-amber, #f59e0b);
+  padding-left: calc(12px - 2px);
+}
+
+.task-row__reminder-badge {
+  color: var(--accent-amber, #f59e0b);
+  font-family: var(--mono-font);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 /* Inline edit input */
 .task-row__edit-input {
   width: 100%;
@@ -848,26 +863,43 @@
   border-color: transparent;
 }
 
-.mini-cal__cell--has-tasks::after {
-  content: '';
+/* Dot container — sits at the bottom of each cell */
+.mini-cal__dots {
   position: absolute;
   bottom: 2px;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.mini-cal__dot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mini-cal__dot--task {
   background: var(--accent);
-  opacity: 0.7;
+  opacity: 0.75;
 }
 
-.mini-cal__cell--selected.mini-cal__cell--has-tasks::after {
+.mini-cal__dot--reminder {
+  background: var(--accent-amber, #f59e0b);
+  opacity: 0.85;
+}
+
+/* When cell is selected, invert dots so they're visible on the accent bg */
+.mini-cal__cell--selected .mini-cal__dot--task {
   background: rgba(0, 0, 0, 0.5);
+  opacity: 1;
 }
 
-/* Hide the dot on the day number itself when selected (dot is redundant) */
-.mini-cal__dot {
-  display: none;  /* handled via ::after pseudo-element */
+.mini-cal__cell--selected .mini-cal__dot--reminder {
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 1;
 }
 
 .mini-cal__today-btn {

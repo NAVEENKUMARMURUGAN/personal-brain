@@ -584,10 +584,26 @@ def _execute_tool(name: str, inputs: dict, today: str, user_id: str) -> tuple[st
 
             telegram_bot.schedule_reminder(telegram_id, reminder_text, remind_dt)
 
+            # Also create a task of type 'reminder' on the reminder date so it
+            # appears in the calendar with a distinct colour.
+            try:
+                reminder_date = remind_dt.date().isoformat()
+                reminder_hhmm = remind_dt.strftime("%H:%M")
+                tasks_module.save_reminder_task(
+                    content=f"⏰ {message}",
+                    date=reminder_date,
+                    reminder_time=reminder_hhmm,
+                    user_id=user_id,
+                )
+                logger.info("Created reminder task for user %s on %s", user_id[:8], reminder_date)
+            except Exception as task_err:
+                logger.warning("Could not create reminder task: %s", task_err)
+
             # Format a friendly confirmation time
             friendly = remind_dt.strftime("%A, %B %-d at %-I:%M %p")
             return (
-                f"Reminder set! I'll ping you on Telegram on {friendly}: \"{message}\"",
+                f"Reminder set! I'll ping you on Telegram on {friendly}: \"{message}\". "
+                f"It's also added to your {remind_dt.strftime('%B %-d')} task list.",
                 {"type": "reminder_set", "remind_at": remind_at, "message": message}
             )
 

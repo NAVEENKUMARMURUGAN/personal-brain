@@ -44,6 +44,31 @@ def _row_to_task(point) -> dict:
         "createdDate": point.payload.get("createdDate", ""),
         "completedDate": point.payload.get("completedDate", None),
         "carriedOver": point.payload.get("carriedOver", False),
+        "taskType": point.payload.get("taskType", "task"),
+        "reminderTime": point.payload.get("reminderTime", None),
+    }
+
+
+def save_reminder_task(content: str, date: str, reminder_time: str, user_id: str) -> dict:
+    """Create a task of type 'reminder' on the specified date with a reminder time (HH:MM)."""
+    vector = _embed(content)
+    task_id = str(uuid.uuid4())
+    _qdrant.upsert(
+        collection_name=COLLECTION_NAME,
+        points=[PointStruct(
+            id=task_id, vector=vector,
+            payload={
+                "content": content, "status": "pending",
+                "createdDate": date, "completedDate": None,
+                "carriedOver": False, "user_id": user_id,
+                "taskType": "reminder", "reminderTime": reminder_time,
+            },
+        )],
+    )
+    return {
+        "id": task_id, "content": content, "status": "pending",
+        "createdDate": date, "completedDate": None, "carriedOver": False,
+        "taskType": "reminder", "reminderTime": reminder_time,
     }
 
 

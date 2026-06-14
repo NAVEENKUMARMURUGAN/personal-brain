@@ -49,6 +49,8 @@ type Task {
   createdDate: String
   completedDate: String
   carriedOver: Boolean
+  taskType: String
+  reminderTime: String
 }
 
 type Memory {

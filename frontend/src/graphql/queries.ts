@@ -46,6 +46,8 @@ export const GET_TASKS = gql`
         status
         createdDate
         carriedOver
+        taskType
+        reminderTime
       }
       completed {
         id
@@ -53,6 +55,8 @@ export const GET_TASKS = gql`
         status
         completedDate
         carriedOver
+        taskType
+        reminderTime
       }
       date
     }
@@ -77,6 +81,8 @@ export const COMPLETE_TASK = gql`
       status
       completedDate
       carriedOver
+      taskType
+      reminderTime
     }
   }
 `
@@ -89,6 +95,8 @@ export const ADD_TASK = gql`
       status
       createdDate
       carriedOver
+      taskType
+      reminderTime
     }
   }
 `
@@ -102,6 +110,8 @@ export const EDIT_TASK = gql`
       createdDate
       completedDate
       carriedOver
+      taskType
+      reminderTime
     }
   }
 `
