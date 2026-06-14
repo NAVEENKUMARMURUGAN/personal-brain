@@ -515,3 +515,30 @@
   border-radius: 4px;
   padding: 4px 8px;
 }
+
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .msg-bubble {
+    max-width: 95%;
+  }
+
+  .msg-bubble--user {
+    max-width: 90%;
+  }
+
+  .msg-code-block pre {
+    font-size: 11px;
+    padding: 12px;
+  }
+
+  .msg-sources {
+    padding: 10px 12px;
+  }
+
+  .msg-source-item {
+    padding: 8px 10px;
+  }
+}

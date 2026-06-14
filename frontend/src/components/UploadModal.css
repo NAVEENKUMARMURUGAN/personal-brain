@@ -284,3 +284,29 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .upload-modal__panel {
+    width: calc(100vw - 32px);
+    max-width: 100%;
+    margin: 16px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .upload-modal__header {
+    padding: 14px 16px;
+  }
+
+  .upload-modal__body {
+    padding: 16px;
+  }
+
+  .upload-modal__drop-zone {
+    padding: 24px 16px;
+  }
+}

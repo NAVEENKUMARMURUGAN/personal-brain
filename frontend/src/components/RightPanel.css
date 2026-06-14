@@ -203,3 +203,14 @@
   color: var(--text-muted);
   word-break: break-word;
 }
+
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ════════════════════════════════════════════════════════════ */
+
+/* Right panel is hidden on tablet/mobile via the wrapper in App.tsx/App.css */
+@media (max-width: 1024px) {
+  .right-panel {
+    display: none;
+  }
+}

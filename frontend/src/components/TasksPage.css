@@ -920,3 +920,65 @@
   color: var(--accent);
   border-color: var(--accent-border);
 }
+
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ════════════════════════════════════════════════════════════ */
+
+/* Tablet: collapse right sidebar panel */
+@media (max-width: 1024px) {
+  .tasks-page__body {
+    grid-template-columns: 1fr;
+  }
+
+  /* Hide the right-hand calendar/stats panel */
+  .tasks-page__sidebar {
+    display: none;
+  }
+
+  .tasks-page__main {
+    border-right: none;
+  }
+}
+
+/* Mobile: tighter padding, full-width inputs */
+@media (max-width: 768px) {
+  .tasks-page__header {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .tasks-page__title {
+    font-size: 14px;
+  }
+
+  .tasks-page__main {
+    padding: 12px 14px;
+    gap: 12px;
+  }
+
+  .tasks-page__add-form {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .tasks-page__add-input {
+    width: 100%;
+  }
+
+  .tasks-page__add-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .task-filters {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .task-filter-btn {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+}

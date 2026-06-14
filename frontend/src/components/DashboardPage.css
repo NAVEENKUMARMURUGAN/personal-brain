@@ -933,10 +933,120 @@
   }
 }
 
+/* ── Tablet ── */
+@media (max-width: 768px) {
+  .dashboard__container {
+    padding: 14px 14px 40px;
+    gap: 12px;
+  }
+
+  .briefing {
+    padding: 18px 16px;
+  }
+
+  .briefing__greeting {
+    font-size: 22px;
+  }
+
+  .briefing__meta {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .briefing__actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .briefing__action-btn {
+    font-size: 11px;
+    padding: 6px 12px;
+  }
+
+  .weather-strip {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .weather-main {
+    flex-wrap: wrap;
+  }
+
+  .hourly-bar {
+    gap: 6px;
+  }
+
+  .feed-item {
+    gap: 10px;
+  }
+
+  .feed-item__rank {
+    display: none;
+  }
+
+  .section-card__header {
+    padding: 12px 14px;
+  }
+
+  .transit-row {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .today-task-row {
+    padding: 10px 14px;
+  }
+
+  .stats-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .repos-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Mobile ── */
 @media (max-width: 600px) {
-  .dashboard__container { padding: 12px 12px 32px; gap: 12px; }
-  .repos-grid { grid-template-columns: 1fr; }
-  .stats-strip { grid-template-columns: repeat(2, 1fr); }
-  .briefing { padding: 18px; }
-  .briefing__greeting { font-size: 22px; }
+  .dashboard__container {
+    padding: 10px 10px 32px;
+    gap: 10px;
+  }
+
+  .briefing {
+    padding: 14px 12px;
+  }
+
+  .briefing__greeting {
+    font-size: 20px;
+  }
+
+  .repos-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-strip {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .feed-item__body {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .feed-item__tag {
+    align-self: flex-start;
+  }
+
+  .concept-card-wrapper {
+    min-height: 160px;
+  }
+
+  .transit-row__badge {
+    font-size: 9px;
+  }
+
+  .section-card__title {
+    font-size: 11px;
+  }
 }

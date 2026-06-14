@@ -341,3 +341,40 @@
 .chat__attachment-remove:hover {
   color: var(--text-primary);
 }
+
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE
+   ════════════════════════════════════════════════════════════ */
+
+@media (max-width: 768px) {
+  .chat__messages {
+    padding: 16px 14px 110px;
+    gap: 12px;
+  }
+
+  .chat__input-bar {
+    padding: 10px 12px 14px;
+  }
+
+  .chat__empty {
+    padding: 40px 20px;
+  }
+
+  .chat__empty-title {
+    font-size: 16px;
+  }
+
+  .chat__suggestions {
+    max-width: 100%;
+  }
+
+  .chat__suggestion-chip {
+    font-size: 10px;
+    padding: 4px 10px;
+  }
+
+  .chat__kbd-btn {
+    /* Hide the keyboard shortcut hint on mobile — touch users won't use it */
+    display: none;
+  }
+}

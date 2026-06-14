@@ -217,6 +217,7 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
   const [page, setPage] = useState<NavPage>('dashboard')
   const [pendingChatMessage, setPendingChatMessage] = useState<string>('')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [systemEvents, setSystemEvents] = useState<SystemEvent[]>([
     { level: 'OK',   message: 'Index update complete' },
     { level: 'INFO', message: '24 new references synced' },
@@ -260,17 +261,35 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
     if (ev) addEvent(ev.level, ev.message)
   }, [addEvent])
 
+  const handleNavClick = (id: NavPage) => {
+    setPage(id)
+    setSidebarOpen(false)
+  }
+
   return (
     <div className="app">
 
+      {/* ── Mobile sidebar overlay backdrop ── */}
+      {sidebarOpen && (
+        <div
+          className="sidebar__backdrop"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* ── Left Sidebar ── */}
-      <aside className="sidebar">
+      <aside className={`sidebar${sidebarOpen ? ' sidebar--open' : ''}`}>
         <div className="sidebar__brand">
           <div className="sidebar__logo">◈</div>
           <div>
             <div className="sidebar__title">Personal Brain</div>
             <div className="sidebar__version">v1.0.4-stable</div>
           </div>
+          <button
+            className="sidebar__close-btn"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close menu"
+          >✕</button>
         </div>
 
         <nav className="sidebar__nav">
@@ -278,7 +297,7 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
             <button
               key={item.id}
               className={`sidebar__nav-item ${page === item.id ? 'sidebar__nav-item--active' : ''}`}
-              onClick={() => setPage(item.id)}
+              onClick={() => handleNavClick(item.id)}
             >
               <span className="sidebar__nav-icon">{item.icon}</span>
               {item.label}
@@ -317,25 +336,38 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
 
       {/* ── Center: session bar + chat OR full-width pages ── */}
       {page === 'dashboard' ? (
-        <div style={{ gridColumn: '2 / 4', overflow: 'hidden', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <div className="app__content app__content--full">
+          <div className="app__mobile-bar">
+            <button className="app__hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+          </div>
           <DashboardPage setPage={setPage} />
         </div>
       ) : page === 'tasks' ? (
-        <div style={{ gridColumn: '2 / 4', overflow: 'hidden' }}>
+        <div className="app__content app__content--full">
+          <div className="app__mobile-bar">
+            <button className="app__hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+          </div>
           <TasksPage />
         </div>
       ) : page === 'knowledge' ? (
-        <div style={{ gridColumn: '2 / 4', overflow: 'hidden' }}>
+        <div className="app__content app__content--full">
+          <div className="app__mobile-bar">
+            <button className="app__hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+          </div>
           <KnowledgePage />
         </div>
       ) : page === 'settings' ? (
-        <div style={{ gridColumn: '2 / 4', overflow: 'auto' }}>
+        <div className="app__content app__content--full app__content--scroll">
+          <div className="app__mobile-bar">
+            <button className="app__hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+          </div>
           <SettingsPage />
         </div>
       ) : (
         <>
           <main className="app__main">
             <div className="app__session-bar">
+              <button className="app__hamburger app__hamburger--inline" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
               <span className="app__session-label">
                 Session: <span className="app__session-name">brain_session.log</span>
               </span>
@@ -351,7 +383,9 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
               onInitialMessageConsumed={() => setPendingChatMessage('')}
             />
           </main>
-          <RightPanel systemEvents={systemEvents} />
+          <div className="app__right-panel-wrapper">
+            <RightPanel systemEvents={systemEvents} />
+          </div>
         </>
       )}
     </div>
