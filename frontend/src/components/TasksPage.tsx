@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
 import { GET_TASKS, COMPLETE_TASK, ADD_TASK, EDIT_TASK, DELETE_TASK } from '../graphql/queries'
 import { API_URL } from '../config'
@@ -8,6 +8,107 @@ import './TasksPage.css'
 function todayISO()     { return new Date().toISOString().slice(0, 10) }
 function yesterdayISO() { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().slice(0, 10) }
 function nDaysAgoISO(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10) }
+function isoFromYMD(y: number, m: number, d: number) {
+  return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+}
+
+// ── Mini Calendar ─────────────────────────────────────────────
+interface MiniCalendarProps {
+  selectedDate: string
+  onSelectDate: (iso: string) => void
+  taskDates: Set<string>   // dates that have at least one task
+}
+
+function MiniCalendar({ selectedDate, onSelectDate, taskDates }: MiniCalendarProps) {
+  const today = todayISO()
+  const [viewYear,  setViewYear]  = useState(() => new Date().getFullYear())
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth())  // 0-based
+
+  // When selectedDate changes externally, sync the view month
+  useEffect(() => {
+    if (selectedDate) {
+      const d = new Date(selectedDate + 'T00:00:00')
+      setViewYear(d.getFullYear())
+      setViewMonth(d.getMonth())
+    }
+  }, [selectedDate])
+
+  const monthName = new Date(viewYear, viewMonth, 1)
+    .toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+
+  const prevMonth = () => {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1) }
+    else setViewMonth(m => m - 1)
+  }
+  const nextMonth = () => {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1) }
+    else setViewMonth(m => m + 1)
+  }
+  const goToToday = () => {
+    const now = new Date()
+    setViewYear(now.getFullYear())
+    setViewMonth(now.getMonth())
+    onSelectDate(today)
+  }
+
+  // Build grid: days of week header + day cells
+  const firstDOW = new Date(viewYear, viewMonth, 1).getDay() // 0=Sun
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+  const cells: (number | null)[] = [
+    ...Array(firstDOW).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ]
+  // Pad to full weeks
+  while (cells.length % 7 !== 0) cells.push(null)
+
+  return (
+    <div className="mini-cal">
+      {/* Header */}
+      <div className="mini-cal__header">
+        <button className="mini-cal__nav" onClick={prevMonth} title="Previous month">‹</button>
+        <div className="mini-cal__month-label">{monthName}</div>
+        <button className="mini-cal__nav" onClick={nextMonth} title="Next month">›</button>
+      </div>
+
+      {/* Day of week labels */}
+      <div className="mini-cal__grid">
+        {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d => (
+          <div key={d} className="mini-cal__dow">{d}</div>
+        ))}
+
+        {/* Day cells */}
+        {cells.map((day, idx) => {
+          if (!day) return <div key={idx} className="mini-cal__cell mini-cal__cell--empty" />
+          const iso  = isoFromYMD(viewYear, viewMonth, day)
+          const isToday    = iso === today
+          const isSelected = iso === selectedDate
+          const hasTasks   = taskDates.has(iso)
+          return (
+            <button
+              key={iso}
+              className={[
+                'mini-cal__cell',
+                isToday    ? 'mini-cal__cell--today'    : '',
+                isSelected ? 'mini-cal__cell--selected' : '',
+                hasTasks   ? 'mini-cal__cell--has-tasks': '',
+              ].join(' ')}
+              onClick={() => onSelectDate(iso)}
+              title={iso}
+            >
+              {day}
+              {hasTasks && <span className="mini-cal__dot" />}
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Today shortcut */}
+      <button className="mini-cal__today-btn" onClick={goToToday}>
+        Go to today
+      </button>
+    </div>
+  )
+}
 
 function formatGroupDate(iso: string): string {
   const today = todayISO(), yesterday = yesterdayISO()
@@ -294,27 +395,66 @@ function DateGroupSection({
 }
 
 // ── Main page ─────────────────────────────────────────────────
-const DATES_TO_SHOW = [todayISO(), yesterdayISO(), nDaysAgoISO(2), nDaysAgoISO(3), nDaysAgoISO(4)]
+
+function buildDateWindow(selectedDate: string): string[] {
+  // Always show today + the selected date.
+  // If selected is today or recent, show a 5-day window around it.
+  const today = todayISO()
+  const sel = selectedDate || today
+
+  // Build a window: selected date + 2 days before it + today (if not already included)
+  const dates = new Set<string>()
+  dates.add(sel)
+
+  // Add today always
+  dates.add(today)
+
+  // Add day before and day after selected (recent context)
+  const d = new Date(sel + 'T00:00:00')
+  for (let offset = 1; offset <= 2; offset++) {
+    const before = new Date(d); before.setDate(d.getDate() - offset)
+    const after  = new Date(d); after.setDate(d.getDate() + offset)
+    dates.add(before.toISOString().slice(0, 10))
+    const afterISO = after.toISOString().slice(0, 10)
+    if (afterISO <= today) dates.add(afterISO)  // don't add future dates (no tasks there yet)
+  }
+
+  // Sort descending (most recent first)
+  return Array.from(dates).sort().reverse().slice(0, 7)
+}
 
 export default function TasksPage() {
-  const today = todayISO(), yesterday = yesterdayISO()
+  const today     = todayISO()
+  const yesterday = yesterdayISO()
   const countdown = useMidnightCountdown()
-  const [search, setSearch]       = useState('')
-  const [completing, setCompleting] = useState<string | null>(null)
-  const [deleting,   setDeleting]   = useState<string | null>(null)
-  const [collapsed,  setCollapsed]  = useState<Record<string, boolean>>({})
 
-  // Local optimistic state per date
-  const [localTasks, setLocalTasks] = useState<Record<string, { pending: Task[]; completed: Task[] }>>({})
+  const [selectedDate, setSelectedDate] = useState(today)
+  const [search,       setSearch]       = useState('')
+  const [completing,   setCompleting]   = useState<string | null>(null)
+  const [deleting,     setDeleting]     = useState<string | null>(null)
+  const [collapsed,    setCollapsed]    = useState<Record<string, boolean>>({})
+  const [localTasks,   setLocalTasks]   = useState<Record<string, { pending: Task[]; completed: Task[] }>>({})
 
-  const { data: d0, refetch: r0 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[0] }, fetchPolicy: 'cache-and-network' })
-  const { data: d1, refetch: r1 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[1] }, fetchPolicy: 'cache-and-network' })
-  const { data: d2, refetch: r2 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[2] }, fetchPolicy: 'cache-and-network' })
-  const { data: d3, refetch: r3 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[3] }, fetchPolicy: 'cache-and-network' })
-  const { data: d4, refetch: r4 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[4] }, fetchPolicy: 'cache-and-network' })
+  const DATES_TO_SHOW = useMemo(() => buildDateWindow(selectedDate), [selectedDate])
 
-  const refetches = [r0, r1, r2, r3, r4]
-  const rawData   = [d0, d1, d2, d3, d4]
+  // Scroll selected date into view when it changes
+  const selectedGroupRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (selectedGroupRef.current) {
+      selectedGroupRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [selectedDate])
+
+  const { data: d0, refetch: r0 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[0] ?? today }, fetchPolicy: 'cache-and-network' })
+  const { data: d1, refetch: r1 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[1] ?? today }, fetchPolicy: 'cache-and-network' })
+  const { data: d2, refetch: r2 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[2] ?? today }, fetchPolicy: 'cache-and-network' })
+  const { data: d3, refetch: r3 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[3] ?? today }, fetchPolicy: 'cache-and-network' })
+  const { data: d4, refetch: r4 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[4] ?? today }, fetchPolicy: 'cache-and-network' })
+  const { data: d5, refetch: r5 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[5] ?? today }, fetchPolicy: 'cache-and-network' })
+  const { data: d6, refetch: r6 } = useQuery(GET_TASKS, { variables: { date: DATES_TO_SHOW[6] ?? today }, fetchPolicy: 'cache-and-network' })
+
+  const refetches = [r0, r1, r2, r3, r4, r5, r6]
+  const rawData   = [d0, d1, d2, d3, d4, d5, d6]
 
   const [completeTaskMutation] = useMutation(COMPLETE_TASK)
   const [addTaskMutation]      = useMutation(ADD_TASK)
@@ -330,6 +470,15 @@ export default function TasksPage() {
     return { date, pending, completed }
   })
 
+  // Build set of dates that have tasks (for calendar dots)
+  const taskDates = useMemo(() => {
+    const s = new Set<string>()
+    groups.forEach(g => {
+      if (g.pending.length > 0 || g.completed.length > 0) s.add(g.date)
+    })
+    return s
+  }, [groups])
+
   const matchSearch = (t: Task) =>
     !search.trim() || t.content.toLowerCase().includes(search.toLowerCase())
 
@@ -339,10 +488,11 @@ export default function TasksPage() {
     completed: g.completed.filter(matchSearch),
   }))
 
-  const todayGroup    = groups[0]
+  const todayGroup    = groups.find(g => g.date === today) ?? { date: today, pending: [], completed: [] }
   const totalToday    = todayGroup.pending.length + todayGroup.completed.length
   const quotaPct      = totalToday === 0 ? 0 : Math.round((todayGroup.completed.length / totalToday) * 100)
-  const yesterdayPendingRaw = groups[1].pending
+  const yesterdayGroup      = groups.find(g => g.date === yesterday)
+  const yesterdayPendingRaw = yesterdayGroup?.pending ?? []
 
   const handleComplete = useCallback(async (taskId: string) => {
     if (completing) return
@@ -372,7 +522,7 @@ export default function TasksPage() {
     } finally {
       setCompleting(null)
     }
-  }, [completing, completeTaskMutation, rawData, refetches])
+  }, [completing, completeTaskMutation, rawData, refetches, DATES_TO_SHOW])
 
   const handleEdit = useCallback(async (taskId: string, content: string) => {
     setLocalTasks(prev => {
@@ -394,16 +544,14 @@ export default function TasksPage() {
       return next
     })
     await editTaskMutation({ variables: { taskId, content } })
-  }, [editTaskMutation, rawData])
+  }, [editTaskMutation, rawData, DATES_TO_SHOW])
 
   const handleDelete = useCallback(async (taskId: string) => {
     setDeleting(taskId)
-    // Find which date group owns this task and update only that group
     setLocalTasks(prev => {
       const next = { ...prev }
       for (let i = 0; i < DATES_TO_SHOW.length; i++) {
         const date = DATES_TO_SHOW[i]
-        // Use current local state if present, otherwise fall back to server data
         const serverData = rawData[i]?.tasks
         const g = prev[date] ?? { pending: serverData?.pending ?? [], completed: serverData?.completed ?? [] }
         const inPending   = g.pending.some(t => t.id === taskId)
@@ -413,14 +561,14 @@ export default function TasksPage() {
             pending:   g.pending.filter(t => t.id !== taskId),
             completed: g.completed.filter(t => t.id !== taskId),
           }
-          break // task can only be in one group
+          break
         }
       }
       return next
     })
     try { await deleteTaskMutation({ variables: { taskId } }) }
     finally { setDeleting(null) }
-  }, [deleteTaskMutation, rawData])
+  }, [deleteTaskMutation, rawData, DATES_TO_SHOW])
 
   const handleAdd = useCallback(async (content: string, date: string) => {
     const tempId = `temp-${Date.now()}`
@@ -446,7 +594,7 @@ export default function TasksPage() {
         return { ...prev, [date]: { ...g, pending: g.pending.filter(t => t.id !== tempId) } }
       })
     }
-  }, [addTaskMutation])
+  }, [addTaskMutation, DATES_TO_SHOW, refetches])
 
   const handleCarryForward = useCallback(async () => {
     const token = localStorage.getItem('pb-token')
@@ -515,25 +663,42 @@ export default function TasksPage() {
           {/* Date groups */}
           <div className="date-groups">
             {filteredGroups.map((group) => (
-              <DateGroupSection
+              <div
                 key={group.date}
-                group={group}
-                onComplete={handleComplete}
-                onEdit={handleEdit}
-                onDelete={handleDelete}
-                onAdd={handleAdd}
-                completing={completing}
-                deleting={deleting}
-                collapsed={!!collapsed[group.date]}
-                onToggle={() => toggleCollapse(group.date)}
-              />
+                ref={group.date === selectedDate ? selectedGroupRef : undefined}
+              >
+                <DateGroupSection
+                  group={group}
+                  onComplete={handleComplete}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                  onAdd={handleAdd}
+                  completing={completing}
+                  deleting={deleting}
+                  collapsed={collapsed[group.date] !== undefined
+                    ? !!collapsed[group.date]
+                    : group.date !== selectedDate && group.date !== today
+                  }
+                  onToggle={() => toggleCollapse(group.date)}
+                />
+              </div>
             ))}
           </div>
         </div>
 
-        {/* ── Right: Productivity Engine ── */}
+        {/* ── Right: Calendar + Productivity Engine ── */}
         <div className="productivity-panel">
-          <div className="productivity-panel__title">PRODUCTIVITY ENGINE</div>
+          {/* Mini Calendar */}
+          <MiniCalendar
+            selectedDate={selectedDate}
+            onSelectDate={(iso) => {
+              setSelectedDate(iso)
+              setCollapsed(prev => ({ ...prev, [iso]: false }))
+            }}
+            taskDates={taskDates}
+          />
+
+          <div className="productivity-panel__title" style={{ marginTop: '20px' }}>PRODUCTIVITY ENGINE</div>
           <div className="productivity-panel__card">
             <DonutRing pct={quotaPct} size={110} />
             <div className="productivity-panel__stats">
@@ -561,11 +726,17 @@ export default function TasksPage() {
       </div>
 
       {/* FAB */}
-      <button className="tasks-page__fab" title="Add task for today"
+      <button
+        className="tasks-page__fab"
+        title={`Add task for ${selectedDate === today ? 'today' : selectedDate}`}
         onClick={() => {
-          setCollapsed(prev => ({ ...prev, [today]: false }))
-          setTimeout(() => document.querySelector<HTMLButtonElement>('.date-group--today .add-task-row')?.click(), 50)
-        }}>+</button>
+          setCollapsed(prev => ({ ...prev, [selectedDate]: false }))
+          setTimeout(() => {
+            const el = selectedGroupRef.current?.querySelector<HTMLButtonElement>('.add-task-row')
+            el?.click()
+          }, 80)
+        }}
+      >+</button>
     </div>
   )
 }
