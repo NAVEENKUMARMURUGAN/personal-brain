@@ -386,6 +386,7 @@ You have access to tools to:
 4. Set Telegram reminders for specific tasks or messages at a given time
 
 TODAY: {today}
+CURRENT LOCAL TIME: {current_local_time}  (use this exact offset when generating remind_at for set_task_reminder)
 
 ENVIRONMENT (weather, transit, events — already fetched, use directly, no tools needed):
 {dashboard_context}
@@ -428,7 +429,9 @@ PLAN MY DAY — when the user asks to plan their day:
 
 REMINDERS (Telegram notifications at a specific time):
 - "remind me to X at Y", "ping me about X at Y", "set a reminder for X" → set_task_reminder
-- Resolve relative times ('at 3pm', 'in 2 hours', 'tomorrow 9am') using TODAY in the system prompt
+- Resolve relative times ('at 3pm', 'in 2 hours', 'tomorrow 9am') using CURRENT LOCAL TIME above
+- The remind_at field MUST include the UTC offset from CURRENT LOCAL TIME (e.g. '2026-06-15T16:45:00+10:00')
+  NEVER send a naive datetime (no offset) — always include the +HH:MM part
 - If Telegram not linked, tell the user to connect it in Settings
 - Confirm the exact time back to the user after setting
 
@@ -544,14 +547,18 @@ def _execute_tool(name: str, inputs: dict, today: str, user_id: str) -> tuple[st
 
             # Parse the datetime
             try:
-                # Try ISO 8601 first
                 remind_dt = _dt.fromisoformat(remind_at)
                 if remind_dt.tzinfo is None:
-                    # Treat as UTC if no tz provided
-                    from datetime import timezone as _tz
-                    remind_dt = remind_dt.replace(tzinfo=_tz.utc)
+                    # Claude sent a naive datetime — fall back to user's local timezone
+                    import zoneinfo as _zi, os as _os
+                    try:
+                        _tz_local = _zi.ZoneInfo(_os.getenv("USER_TIMEZONE", "Australia/Sydney"))
+                        remind_dt = remind_dt.replace(tzinfo=_tz_local)
+                    except Exception:
+                        from datetime import timezone as _tz
+                        remind_dt = remind_dt.replace(tzinfo=_tz.utc)
             except ValueError:
-                return f"Could not parse reminder time '{remind_at}'. Please use a format like '2026-06-14T15:00:00'.", {}
+                return f"Could not parse reminder time '{remind_at}'. Please use a format like '2026-06-14T15:00:00+10:00'.", {}
 
             now = _dt.now(remind_dt.tzinfo)
             if remind_dt <= now:
@@ -582,6 +589,12 @@ def _execute_tool(name: str, inputs: dict, today: str, user_id: str) -> tuple[st
             first_name  = row["first_name"] or "there"
             reminder_text = f"⏰ *Reminder, {first_name}!*\n\n{message}"
 
+            logger.info(
+                "Scheduling reminder for user=%s telegram_id=%s at=%s (UTC=%s)",
+                user_id[:8], telegram_id,
+                remind_dt.isoformat(),
+                remind_dt.astimezone(timezone.utc).isoformat(),
+            )
             telegram_bot.schedule_reminder(telegram_id, reminder_text, remind_dt)
 
             # Also create a task of type 'reminder' on the reminder date so it
@@ -768,11 +781,26 @@ def _build_response(answer: str, tool_calls: list[dict]) -> dict:
 # Agent entry point
 # ─────────────────────────────────────────────────────────────
 
+def _local_now() -> datetime:
+    """Return current datetime in the configured local timezone (USER_TIMEZONE env var)."""
+    try:
+        import zoneinfo
+        tz_name = os.getenv("USER_TIMEZONE", "Australia/Sydney")
+        tz = zoneinfo.ZoneInfo(tz_name)
+        return datetime.now(tz)
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
 async def process_message(ctx: ContextManager, user_id: str) -> dict:
-    today = datetime.now(timezone.utc).date().isoformat()
+    local_now = _local_now()
+    today = local_now.date().isoformat()
+    # e.g. "2026-06-15T16:45:00+10:00"
+    current_local_time = local_now.strftime("%Y-%m-%dT%H:%M:%S") + local_now.strftime("%z")[:5] + ":" + local_now.strftime("%z")[5:]
 
     system = SYSTEM_PROMPT.format(
         today=today,
+        current_local_time=current_local_time,
         dashboard_context=_build_dashboard_context(user_id=user_id),
         categories="\n".join(f"- {c['name']}" for c in ctx.categories) or "(none yet)",
         pending_tasks="\n".join(f"- [{t['id']}] {t['content']}" for t in ctx.pending_tasks) or "(none)",
