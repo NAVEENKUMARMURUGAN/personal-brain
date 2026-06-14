@@ -437,7 +437,8 @@ async def handle_update(update: dict):
 
     # ── Extract text ────────────────────────────────────────────
     text = message.get("text", "").strip()
-    logger.info("Message text=%r voice=%s", text[:100] if text else "", bool(message.get("voice")))
+    # Do NOT log message content — it may contain passwords, PINs, or secrets
+    logger.info("Telegram message received: voice=%s text_len=%d", bool(message.get("voice")), len(text))
 
     # Voice message → transcribe
     voice = message.get("voice") or message.get("audio")
@@ -472,14 +473,14 @@ async def handle_update(update: dict):
 
     # ── Route through Claude agent ──────────────────────────────
     try:
-        logger.info("Calling Claude agent for user=%s message=%r", user_id[:8], text[:80])
+        logger.info("Calling Claude agent for user=%s", user_id[:8])
         await _tg_post("sendChatAction", {"chat_id": chat_id, "action": "typing"})
 
         ctx = await ContextManager.build(current_message=text, user_id=user_id)
         result = await claude.process_message(ctx, user_id)
         answer = _format_response(result)
 
-        logger.info("Claude returned answer=%r", answer[:120])
+        logger.info("Claude responded: action=%s", result.get("action", "chat"))
 
         # Save to chat history
         import uuid as _uuid
@@ -508,13 +509,28 @@ async def _handle_update_safe(update: dict):
 # ── Webhook registration ────────────────────────────────────────
 
 async def set_webhook(backend_url: str):
-    """Register the webhook URL with Telegram. Called on startup."""
+    """Register the webhook URL with Telegram. Called on startup.
+
+    Includes a secret_token when TELEGRAM_WEBHOOK_SECRET is set so Telegram
+    authenticates each incoming webhook call. This prevents anyone who discovers
+    the webhook URL from spoofing Telegram updates.
+    """
     webhook_url = f"{backend_url.rstrip('/')}/telegram/webhook"
-    result = await _tg_post("setWebhook", {
+    payload: dict = {
         "url": webhook_url,
         "allowed_updates": ["message", "edited_message"],
         "drop_pending_updates": True,
-    })
+    }
+    webhook_secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+    if webhook_secret:
+        payload["secret_token"] = webhook_secret
+        logger.info("Telegram webhook secret_token configured")
+    else:
+        logger.warning(
+            "TELEGRAM_WEBHOOK_SECRET not set — webhook has no signature validation. "
+            "Set it to a random string (openssl rand -hex 16) and update Railway."
+        )
+    result = await _tg_post("setWebhook", payload)
     if result.get("ok"):
         logger.info("Telegram webhook set: %s", webhook_url)
     else:

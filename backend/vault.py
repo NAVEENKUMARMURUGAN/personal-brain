@@ -47,10 +47,16 @@ _qdrant = QdrantClient(url=QDRANT_URL)
 
 # ── Encryption helpers ─────────────────────────────────────────────────────────
 
-def _derive_key(vault_secret: str) -> bytes:
-    """Derive a 32-byte AES key from the VAULT_SECRET using PBKDF2-HMAC-SHA256.
-    Salt is deterministic so we don't need to store it — the secret itself provides entropy."""
-    salt = hashlib.sha256(b"personal-brain-vault-v1").digest()
+def _derive_key(vault_secret: str, user_id: str) -> bytes:
+    """Derive a unique 32-byte AES key per user using PBKDF2-HMAC-SHA256.
+
+    Salt incorporates the user_id so each user gets a distinct encryption key.
+    Even if VAULT_SECRET leaks, an attacker must still know each user's UUID
+    to derive their specific key. Keys are never stored — derived fresh each call.
+    """
+    # Salt = SHA-256(app_domain || user_id) — unique per user, deterministic
+    salt_input = f"personal-brain-vault-v1:{user_id}".encode()
+    salt = hashlib.sha256(salt_input).digest()
     return hashlib.pbkdf2_hmac("sha256", vault_secret.encode(), salt, iterations=200_000)
 
 
@@ -84,15 +90,21 @@ def _decrypt(ciphertext_b64: str, key: bytes) -> str:
         raise ValueError(f"Vault decryption failed: {e}")
 
 
-def _get_key() -> bytes:
-    """Return the encryption key, raising clearly if VAULT_SECRET is not set."""
+def _get_key(user_id: str) -> bytes:
+    """Return a per-user encryption key derived from VAULT_SECRET + user_id.
+
+    Each user gets a unique AES-256 key. Leaking VAULT_SECRET alone is not
+    sufficient to decrypt any user's vault — the attacker also needs each
+    user's UUID (which is stored server-side, not in JWTs by default).
+    """
     if not VAULT_SECRET:
         raise RuntimeError(
             "VAULT_SECRET environment variable is not set. "
-            "Set it to a long random string to enable the vault. "
-            "Example: openssl rand -hex 32"
+            "Generate one with: openssl rand -hex 32"
         )
-    return _derive_key(VAULT_SECRET)
+    if not user_id:
+        raise ValueError("user_id is required for vault key derivation")
+    return _derive_key(VAULT_SECRET, user_id)
 
 
 # ── Qdrant collection ──────────────────────────────────────────────────────────
@@ -132,7 +144,7 @@ def save_item(
     notes: str = "",
 ) -> dict:
     """Encrypt and store a vault item. Returns the saved item metadata (no secret)."""
-    key = _get_key()
+    key = _get_key(user_id)
     encrypted_secret = _encrypt(secret, key)
     encrypted_notes  = _encrypt(notes, key) if notes else ""
 
@@ -159,7 +171,7 @@ def save_item(
 
 def search_items(user_id: str, query: str, limit: int = 5) -> list[dict]:
     """Semantic search over vault labels, then decrypt and return matching items."""
-    key = _get_key()
+    key = _get_key(user_id)
     vector = _embed_label(query)
 
     results = _qdrant.search(
@@ -221,7 +233,7 @@ def list_items(user_id: str, limit: int = 50) -> list[dict]:
 
 def get_item(user_id: str, item_id: str) -> Optional[dict]:
     """Retrieve and decrypt a single vault item by ID."""
-    key = _get_key()
+    key = _get_key(user_id)
     results = _qdrant.retrieve(
         collection_name=COLLECTION_NAME,
         ids=[item_id],
@@ -280,7 +292,7 @@ def update_item(
     if not existing:
         return None
 
-    key = _get_key()
+    key = _get_key(user_id)
     new_label    = label    or existing["label"]
     new_secret   = secret   or existing["secret"]
     new_notes    = notes    if notes is not None else existing["notes"]

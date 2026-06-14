@@ -234,15 +234,18 @@ def reschedule_task(task_id: str, new_date: str, user_id: str) -> dict:
 
 
 def get_completed_tasks_last_n_days(days: int = 30, user_id: str = "") -> list[dict]:
+    if not user_id:
+        raise ValueError("get_completed_tasks_last_n_days requires a non-empty user_id")
     from datetime import timedelta
     today = datetime.now(timezone.utc).date()
     cutoff = (today - timedelta(days=days)).isoformat()
 
     all_points = []
     offset = None
-    must = [FieldCondition(key="status", match=MatchValue(value="complete"))]
-    if user_id:
-        must.append(FieldCondition(key="user_id", match=MatchValue(value=user_id)))
+    must = [
+        FieldCondition(key="status", match=MatchValue(value="complete")),
+        FieldCondition(key="user_id", match=MatchValue(value=user_id)),
+    ]
 
     while True:
         batch, offset = _qdrant.scroll(

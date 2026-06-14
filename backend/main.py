@@ -9,6 +9,9 @@ load_dotenv()
 from fastapi import FastAPI, Request, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from typing import Optional
 
 import brain
@@ -23,13 +26,21 @@ from context_manager import ContextManager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+# ── Rate limiter ───────────────────────────────────────────────
+limiter = Limiter(key_func=get_remote_address)
 
+app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── CORS — restrict to the configured frontend origin ──────────
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://localhost:5173"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
+    allow_credentials=False,
 )
 
 # Lazy-loaded Whisper model
@@ -243,7 +254,7 @@ async def google_callback(request: Request, code: Optional[str] = None, state: O
         redirect_uri = f"{BACKEND_URL}/auth/google/callback"
         logger.info("Exchanging code with redirect_uri=%s", redirect_uri)
         info  = auth.exchange_code(code, redirect_uri)
-        logger.info("Got user info: email=%s", info["email"])
+        logger.info("Got user info: google_id present=%s", bool(info.get("sub")))
         user  = auth.upsert_user(info["google_id"], info["email"], info["name"], info["avatar_url"])
         token = auth.issue_jwt(user)
         logger.info("Issuing JWT for user=%s, redirecting to frontend", user["id"])
@@ -313,6 +324,7 @@ async def unlink_telegram(authorization: Optional[str] = Header(None)):
 # ── GraphQL ────────────────────────────────────────────────────
 
 @app.post("/graphql")
+@limiter.limit("60/minute")           # 60 requests/min per IP — covers normal use
 async def graphql_post(request: Request):
     return await graphql_handler.handle(request)
 
@@ -329,18 +341,40 @@ async def context_debug(message: str = "test", authorization: Optional[str] = He
     return PlainTextResponse(ctx.debug(), media_type="text/plain")
 
 
+# ── Auth logout ────────────────────────────────────────────────
+
+@app.post("/auth/logout")
+async def logout(authorization: Optional[str] = Header(None)):
+    """Revoke the current JWT immediately. Token is added to revocation list."""
+    if not authorization or not authorization.startswith("Bearer "):
+        return JSONResponse({"error": "No token provided"}, status_code=400)
+    token = authorization[7:].strip()
+    ok = auth.revoke_token(token)
+    if ok:
+        return JSONResponse({"logged_out": True})
+    return JSONResponse({"error": "Token invalid or already revoked"}, status_code=400)
+
+
 @app.post("/transcribe")
+@limiter.limit("10/minute")           # Whisper is CPU-heavy — 10/min is generous
 async def transcribe(
+    request: Request,
     audio: UploadFile = File(...),
     authorization: Optional[str] = Header(None),
 ):
     """Transcribe audio using faster-whisper. Requires auth."""
     if not auth.extract_user_id(authorization):
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    # Cap upload size at 25MB
+    MAX_SIZE = 25 * 1024 * 1024
+    content = await audio.read()
+    if len(content) > MAX_SIZE:
+        return JSONResponse({"error": "Audio file too large (max 25MB)"}, status_code=413)
     try:
         suffix = os.path.splitext(audio.filename or "audio.webm")[1] or ".webm"
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            tmp.write(await audio.read())
+            tmp.write(content)   # use already-read content, not audio.read() again
             tmp_path = tmp.name
 
         model = _get_whisper()
@@ -359,17 +393,33 @@ async def transcribe(
 
 # ── Telegram webhook ───────────────────────────────────────────
 
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request):
-    """Receive updates from Telegram and process them."""
+    """Receive updates from Telegram and process them.
+
+    Validates X-Telegram-Bot-Api-Secret-Token header when TELEGRAM_WEBHOOK_SECRET is set.
+    Never logs message content — only structural metadata.
+    """
+    # Validate webhook secret token if configured
+    if TELEGRAM_WEBHOOK_SECRET:
+        incoming_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not incoming_secret or incoming_secret != TELEGRAM_WEBHOOK_SECRET:
+            logger.warning("Telegram webhook: invalid secret token — rejecting")
+            return JSONResponse({"ok": False}, status_code=403)
+
     body = await request.body()
-    logger.info("Telegram webhook hit — body: %s", body[:500].decode("utf-8", errors="replace"))
+    # Log only structural info — never message content
+    logger.debug("Telegram webhook received: %d bytes", len(body))
     try:
         update = json.loads(body)
-        # Process synchronously so errors appear in logs immediately
+        update_id = update.get("update_id", "?")
+        update_type = next((k for k in ("message", "edited_message", "callback_query") if k in update), "unknown")
+        logger.info("Telegram update id=%s type=%s", update_id, update_type)
         await telegram_bot._handle_update_safe(update)
     except Exception as e:
-        logger.error("Telegram webhook parse error: %s", e, exc_info=True)
+        logger.error("Telegram webhook error: %s", e, exc_info=True)
     return JSONResponse({"ok": True})
 
 

@@ -135,14 +135,16 @@ def get_recent_turns(
     after: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> list[dict]:
-    """Return the last N text messages for Claude context, scoped to a user."""
+    """Return the last N text messages for Claude context, scoped to a user.
+
+    user_id is required for multi-user deployments. Raises ValueError if blank.
+    """
+    if not user_id:
+        raise ValueError("get_recent_turns requires a non-empty user_id")
     conn = get_conn()
     try:
-        conditions = ["type = 'text'"]
-        params: list = []
-        if user_id:
-            conditions.append("user_id = ?")
-            params.append(user_id)
+        conditions = ["type = 'text'", "user_id = ?"]
+        params: list = [user_id]
         if after:
             conditions.append("created_at > ?")
             params.append(after)
@@ -163,18 +165,17 @@ def get_messages(
     cursor: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> dict:
+    if not user_id:
+        raise ValueError("get_messages requires a non-empty user_id")
     conn = get_conn()
     try:
-        conditions: list[str] = []
-        params: list = []
-        if user_id:
-            conditions.append("user_id = ?")
-            params.append(user_id)
+        conditions: list[str] = ["user_id = ?"]
+        params: list = [user_id]
         if cursor:
             conditions.append("created_at < ?")
             params.append(cursor)
 
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where = f"WHERE {' AND '.join(conditions)}"
         params.append(limit + 1)
         rows = conn.execute(
             f"SELECT * FROM messages {where} ORDER BY created_at DESC LIMIT ?",

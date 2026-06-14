@@ -481,10 +481,15 @@ def _execute_tool(name: str, inputs: dict, today: str, user_id: str) -> tuple[st
                 lines = []
                 for it in items:
                     lines.append(f"🔐 {it['label']} ({it['category']})")
-                    lines.append(f"   Secret: {it['secret']}")
+                    # Mask the secret in the LLM tool result — the frontend
+                    # receives the full secret via the metadata payload,
+                    # shown directly to the user without passing through Anthropic.
+                    masked = it['secret'][:2] + "•" * (len(it['secret']) - 2) if len(it['secret']) > 2 else "••"
+                    lines.append(f"   Secret: {masked}  [shown securely to user]")
                     if it.get("notes"):
                         lines.append(f"   Notes:  {it['notes']}")
                     lines.append(f"   ID: {it['id']}")
+                # Items in metadata payload shown directly to user by frontend (not via LLM)
                 return "\n".join(lines), {"type": "vault_search", "items": items}
             except RuntimeError as e:
                 return f"Vault error: {e}", {"error": str(e)}
