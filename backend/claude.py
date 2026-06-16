@@ -22,7 +22,7 @@ from context_manager import ContextManager
 logger = logging.getLogger(__name__)
 
 _client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-MODEL   = "claude-sonnet-4-20250514"
+MODEL   = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
 MAX_TOOL_ROUNDS = 5   # safety cap on the agentic loop
 
 # ─────────────────────────────────────────────────────────────
