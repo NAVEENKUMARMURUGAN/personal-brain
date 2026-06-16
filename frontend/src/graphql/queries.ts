@@ -48,6 +48,10 @@ export const GET_TASKS = gql`
         carriedOver
         taskType
         reminderTime
+        isRecurring
+        recurrence
+        recurrenceEndDate
+        parentTaskId
       }
       completed {
         id
@@ -57,6 +61,10 @@ export const GET_TASKS = gql`
         carriedOver
         taskType
         reminderTime
+        isRecurring
+        recurrence
+        recurrenceEndDate
+        parentTaskId
       }
       date
     }
@@ -83,13 +91,17 @@ export const COMPLETE_TASK = gql`
       carriedOver
       taskType
       reminderTime
+      isRecurring
+      recurrence
+      recurrenceEndDate
+      parentTaskId
     }
   }
 `
 
 export const ADD_TASK = gql`
-  mutation AddTask($content: String!, $date: String) {
-    addTask(content: $content, date: $date) {
+  mutation AddTask($content: String!, $date: String, $recurrence: String, $recurrenceEndDate: String) {
+    addTask(content: $content, date: $date, recurrence: $recurrence, recurrenceEndDate: $recurrenceEndDate) {
       id
       content
       status
@@ -97,6 +109,28 @@ export const ADD_TASK = gql`
       carriedOver
       taskType
       reminderTime
+      isRecurring
+      recurrence
+      recurrenceEndDate
+      parentTaskId
+    }
+  }
+`
+
+export const ADD_REMINDER = gql`
+  mutation AddReminder($content: String!, $date: String!, $time: String!, $recurrence: String, $recurrenceEndDate: String) {
+    addReminder(content: $content, date: $date, time: $time, recurrence: $recurrence, recurrenceEndDate: $recurrenceEndDate) {
+      id
+      content
+      status
+      createdDate
+      carriedOver
+      taskType
+      reminderTime
+      isRecurring
+      recurrence
+      recurrenceEndDate
+      parentTaskId
     }
   }
 `
@@ -112,6 +146,10 @@ export const EDIT_TASK = gql`
       carriedOver
       taskType
       reminderTime
+      isRecurring
+      recurrence
+      recurrenceEndDate
+      parentTaskId
     }
   }
 `

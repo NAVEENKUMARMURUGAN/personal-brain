@@ -221,6 +221,21 @@ def _register_dashboard_pipelines() -> None:
     # 17:00 — second overdue nudge (afternoon) for items still not done
     _add(send_overdue_alerts,  CronTrigger(hour=17, minute=0),  "reminders_overdue_afternoon")
 
+    # ── Recurring task spawner ─────────────────────────────────
+    # 05:05 — materialise next-day instances for all recurring tasks/reminders
+    # Runs just after the 05:00 dashboard pipeline so tasks are ready by morning
+    import tasks as tasks_module_main
+
+    def _spawn_recurring() -> None:
+        try:
+            count = tasks_module_main.spawn_recurring_tasks()
+            if count:
+                logger.info("Spawned %d recurring task instances", count)
+        except Exception as exc:
+            logger.error("Recurring task spawn failed: %s", exc, exc_info=True)
+
+    _add(_spawn_recurring, CronTrigger(hour=5, minute=5), "recurring_tasks_spawn")
+
 
 @app.get("/health")
 async def health():

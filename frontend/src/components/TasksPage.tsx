@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useQuery, useMutation } from '@apollo/client'
-import { GET_TASKS, COMPLETE_TASK, ADD_TASK, EDIT_TASK, DELETE_TASK } from '../graphql/queries'
+import { GET_TASKS, COMPLETE_TASK, ADD_TASK, ADD_REMINDER, EDIT_TASK, DELETE_TASK } from '../graphql/queries'
 import { API_URL } from '../config'
 import './TasksPage.css'
 
@@ -182,8 +182,12 @@ function VelocityChart({ data }: { data: number[] }) {
 interface Task {
   id: string; content: string; status: string
   createdDate?: string; completedDate?: string | null; carriedOver?: boolean
-  taskType?: string        // 'task' | 'reminder'
-  reminderTime?: string    // HH:MM — only set for taskType === 'reminder'
+  taskType?: string           // 'task' | 'reminder'
+  reminderTime?: string       // HH:MM — only set for taskType === 'reminder'
+  isRecurring?: boolean
+  recurrence?: string | null  // daily|weekly|monthly|weekdays
+  recurrenceEndDate?: string | null
+  parentTaskId?: string | null
 }
 
 interface DateGroup { date: string; pending: Task[]; completed: Task[] }
@@ -279,6 +283,10 @@ function TaskRow({ task, onComplete, onEdit, onDelete, completing, deleting }: T
                 ? <span className="task-row__reminder-badge">⏰ reminder{task.reminderTime ? ` · ${task.reminderTime}` : ''}</span>
                 : <span className="task-row__category">{inferCategory(task.content)}</span>
               }
+              {task.isRecurring && task.recurrence && (
+                <><span className="task-row__dot">·</span>
+                <span className="task-row__recurring-badge">↺ {task.recurrence}</span></>
+              )}
               {task.carriedOver && <><span className="task-row__dot">·</span><span className="task-row__carried">carried</span></>}
             </>
           )}
@@ -345,6 +353,163 @@ function AddTaskRow({ date, onAdd }: { date: string; onAdd: (content: string, da
       <button className="add-task-row__ok" onClick={commit}>Add</button>
       <button className="add-task-row__cancel" onClick={() => { setValue(''); setOpen(false) }}>✕</button>
     </div>
+  )
+}
+
+// ── Add Task / Reminder Modal ─────────────────────────────────
+type TaskModalMode = 'task' | 'reminder'
+type RecurrenceOption = 'none' | 'daily' | 'weekdays' | 'weekly' | 'monthly'
+
+interface AddTaskModalProps {
+  defaultDate: string
+  onClose: () => void
+  onAddTask: (content: string, date: string, recurrence?: string, recurrenceEndDate?: string) => void
+  onAddReminder: (content: string, date: string, time: string, recurrence?: string, recurrenceEndDate?: string) => void
+}
+
+function AddTaskModal({ defaultDate, onClose, onAddTask, onAddReminder }: AddTaskModalProps) {
+  const [mode, setMode]             = useState<TaskModalMode>('task')
+  const [content, setContent]       = useState('')
+  const [date, setDate]             = useState(defaultDate)
+  const [time, setTime]             = useState('09:00')
+  const [recurrence, setRecurrence] = useState<RecurrenceOption>('none')
+  const [endDate, setEndDate]       = useState('')
+  const [error, setError]           = useState('')
+  const inputRef                    = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { inputRef.current?.focus() }, [])
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const handleSubmit = () => {
+    const t = content.trim()
+    if (!t) { setError('Please enter a description.'); return }
+    if (mode === 'reminder' && !time) { setError('Please set a reminder time.'); return }
+    const rec = recurrence !== 'none' ? recurrence : undefined
+    const end = rec && endDate ? endDate : undefined
+    if (mode === 'reminder') {
+      onAddReminder(t, date, time, rec, end)
+    } else {
+      onAddTask(t, date, rec, end)
+    }
+    onClose()
+  }
+
+  const RECURRENCE_LABELS: Record<RecurrenceOption, string> = {
+    none: 'Does not repeat',
+    daily: 'Daily',
+    weekdays: 'Every weekday (Mon–Fri)',
+    weekly: 'Weekly',
+    monthly: 'Monthly',
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="task-modal__backdrop" onClick={onClose} />
+
+      <div className="task-modal" role="dialog" aria-modal="true" aria-label="Add task or reminder">
+        {/* Header */}
+        <div className="task-modal__header">
+          <div className="task-modal__tabs">
+            <button
+              className={`task-modal__tab${mode === 'task' ? ' task-modal__tab--active' : ''}`}
+              onClick={() => setMode('task')}
+            >◻ Task</button>
+            <button
+              className={`task-modal__tab${mode === 'reminder' ? ' task-modal__tab--active' : ''}`}
+              onClick={() => setMode('reminder')}
+            >⏰ Reminder</button>
+          </div>
+          <button className="task-modal__close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        {/* Body */}
+        <div className="task-modal__body">
+          {/* Description */}
+          <div className="task-modal__field">
+            <label className="task-modal__label">Description</label>
+            <input
+              ref={inputRef}
+              className="task-modal__input"
+              placeholder={mode === 'reminder' ? 'Reminder description…' : 'Task description…'}
+              value={content}
+              onChange={(e) => { setContent(e.target.value); setError('') }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
+            />
+          </div>
+
+          {/* Date + Time row */}
+          <div className="task-modal__row">
+            <div className="task-modal__field task-modal__field--half">
+              <label className="task-modal__label">Date</label>
+              <input
+                type="date"
+                className="task-modal__input task-modal__input--date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+              />
+            </div>
+            {mode === 'reminder' && (
+              <div className="task-modal__field task-modal__field--half">
+                <label className="task-modal__label">Time</label>
+                <input
+                  type="time"
+                  className="task-modal__input task-modal__input--time"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Recurrence */}
+          <div className="task-modal__field">
+            <label className="task-modal__label">Repeat</label>
+            <div className="task-modal__recurrence-grid">
+              {(Object.keys(RECURRENCE_LABELS) as RecurrenceOption[]).map((opt) => (
+                <button
+                  key={opt}
+                  className={`task-modal__recurrence-btn${recurrence === opt ? ' task-modal__recurrence-btn--active' : ''}`}
+                  onClick={() => setRecurrence(opt)}
+                >
+                  {RECURRENCE_LABELS[opt]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* End date (only when recurrence is set) */}
+          {recurrence !== 'none' && (
+            <div className="task-modal__field">
+              <label className="task-modal__label">End date <span className="task-modal__label-hint">(optional)</span></label>
+              <input
+                type="date"
+                className="task-modal__input task-modal__input--date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                min={date}
+              />
+            </div>
+          )}
+
+          {error && <div className="task-modal__error">{error}</div>}
+        </div>
+
+        {/* Footer */}
+        <div className="task-modal__footer">
+          <button className="task-modal__cancel-btn" onClick={onClose}>Cancel</button>
+          <button className="task-modal__submit-btn" onClick={handleSubmit}>
+            {mode === 'reminder' ? 'Set Reminder' : 'Add Task'}
+          </button>
+        </div>
+      </div>
+    </>
   )
 }
 
@@ -447,6 +612,7 @@ export default function TasksPage() {
   const [deleting,     setDeleting]     = useState<string | null>(null)
   const [collapsed,    setCollapsed]    = useState<Record<string, boolean>>({})
   const [localTasks,   setLocalTasks]   = useState<Record<string, { pending: Task[]; completed: Task[] }>>({})
+  const [modalOpen,    setModalOpen]    = useState(false)
 
   const DATES_TO_SHOW = useMemo(() => buildDateWindow(selectedDate), [selectedDate])
 
@@ -471,6 +637,7 @@ export default function TasksPage() {
 
   const [completeTaskMutation] = useMutation(COMPLETE_TASK)
   const [addTaskMutation]      = useMutation(ADD_TASK)
+  const [addReminderMutation]  = useMutation(ADD_REMINDER)
   const [editTaskMutation]     = useMutation(EDIT_TASK)
   const [deleteTaskMutation]   = useMutation(DELETE_TASK)
 
@@ -586,15 +753,27 @@ export default function TasksPage() {
     finally { setDeleting(null) }
   }, [deleteTaskMutation, rawData, DATES_TO_SHOW])
 
-  const handleAdd = useCallback(async (content: string, date: string) => {
+  const handleAdd = useCallback(async (
+    content: string,
+    date: string,
+    recurrence?: string,
+    recurrenceEndDate?: string,
+  ) => {
     const tempId = `temp-${Date.now()}`
-    const tempTask: Task = { id: tempId, content, status: 'pending', createdDate: date }
+    const isRecurring = !!recurrence && recurrence !== 'none'
+    const tempTask: Task = {
+      id: tempId, content, status: 'pending', createdDate: date,
+      taskType: 'task', isRecurring, recurrence: isRecurring ? recurrence : null,
+      recurrenceEndDate: recurrenceEndDate ?? null,
+    }
     setLocalTasks(prev => {
       const g = prev[date] ?? { pending: [], completed: [] }
       return { ...prev, [date]: { ...g, pending: [...g.pending, tempTask] } }
     })
     try {
-      const res = await addTaskMutation({ variables: { content, date } })
+      const res = await addTaskMutation({
+        variables: { content, date, recurrence: recurrence || null, recurrenceEndDate: recurrenceEndDate || null },
+      })
       const newTask = res.data?.addTask
       if (newTask) {
         setLocalTasks(prev => {
@@ -611,6 +790,50 @@ export default function TasksPage() {
       })
     }
   }, [addTaskMutation, DATES_TO_SHOW, refetches])
+
+  const handleAddReminder = useCallback(async (
+    content: string,
+    date: string,
+    time: string,
+    recurrence?: string,
+    recurrenceEndDate?: string,
+  ) => {
+    const tempId = `temp-reminder-${Date.now()}`
+    const isRecurring = !!recurrence && recurrence !== 'none'
+    const tempTask: Task = {
+      id: tempId, content, status: 'pending', createdDate: date,
+      taskType: 'reminder', reminderTime: time,
+      isRecurring, recurrence: isRecurring ? recurrence : null,
+      recurrenceEndDate: recurrenceEndDate ?? null,
+    }
+    setLocalTasks(prev => {
+      const g = prev[date] ?? { pending: [], completed: [] }
+      return { ...prev, [date]: { ...g, pending: [...g.pending, tempTask] } }
+    })
+    try {
+      const res = await addReminderMutation({
+        variables: {
+          content, date, time,
+          recurrence: recurrence || null,
+          recurrenceEndDate: recurrenceEndDate || null,
+        },
+      })
+      const newTask = res.data?.addReminder
+      if (newTask) {
+        setLocalTasks(prev => {
+          const g = prev[date] ?? { pending: [], completed: [] }
+          return { ...prev, [date]: { ...g, pending: g.pending.map(t => t.id === tempId ? newTask : t) } }
+        })
+      }
+      const idx = DATES_TO_SHOW.indexOf(date)
+      if (idx >= 0) await refetches[idx]()
+    } catch {
+      setLocalTasks(prev => {
+        const g = prev[date] ?? { pending: [], completed: [] }
+        return { ...prev, [date]: { ...g, pending: g.pending.filter(t => t.id !== tempId) } }
+      })
+    }
+  }, [addReminderMutation, DATES_TO_SHOW, refetches])
 
   const handleCarryForward = useCallback(async () => {
     const token = localStorage.getItem('pb-token')
@@ -745,15 +968,25 @@ export default function TasksPage() {
       {/* FAB */}
       <button
         className="tasks-page__fab"
-        title={`Add task for ${selectedDate === today ? 'today' : selectedDate}`}
-        onClick={() => {
-          setCollapsed(prev => ({ ...prev, [selectedDate]: false }))
-          setTimeout(() => {
-            const el = selectedGroupRef.current?.querySelector<HTMLButtonElement>('.add-task-row')
-            el?.click()
-          }, 80)
-        }}
+        title={`Add task or reminder for ${selectedDate === today ? 'today' : selectedDate}`}
+        onClick={() => setModalOpen(true)}
       >+</button>
+
+      {/* Add Task / Reminder Modal */}
+      {modalOpen && (
+        <AddTaskModal
+          defaultDate={selectedDate}
+          onClose={() => setModalOpen(false)}
+          onAddTask={(content, date, recurrence, recurrenceEndDate) => {
+            handleAdd(content, date, recurrence, recurrenceEndDate)
+            setCollapsed(prev => ({ ...prev, [date]: false }))
+          }}
+          onAddReminder={(content, date, time, recurrence, recurrenceEndDate) => {
+            handleAddReminder(content, date, time, recurrence, recurrenceEndDate)
+            setCollapsed(prev => ({ ...prev, [date]: false }))
+          }}
+        />
+      )}
     </div>
   )
 }

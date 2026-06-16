@@ -34,7 +34,8 @@ input AttachmentInput {
 
 type Mutation {
   send(content: String!, clearedAt: String, attachments: [AttachmentInput]): BrainResponse
-  addTask(content: String!, date: String): Task
+  addTask(content: String!, date: String, recurrence: String, recurrenceEndDate: String): Task
+  addReminder(content: String!, date: String!, time: String!, recurrence: String, recurrenceEndDate: String): Task
   editTask(taskId: String!, content: String!): Task
   deleteTask(taskId: String!): Boolean
   completeTask(taskId: String!): Task
@@ -57,6 +58,10 @@ type Task {
   carriedOver: Boolean
   taskType: String
   reminderTime: String
+  isRecurring: Boolean
+  recurrence: String
+  recurrenceEndDate: String
+  parentTaskId: String
 }
 
 type Memory {
@@ -365,6 +370,8 @@ async def handle(request: Request) -> JSONResponse:
             result = await _handle_complete_task(variables, user_id)
         elif op_type == "mutation" and field == "addTask":
             result = await _handle_add_task(variables, user_id)
+        elif op_type == "mutation" and field == "addReminder":
+            result = await _handle_add_reminder(variables, user_id)
         elif op_type == "mutation" and field == "editTask":
             result = await _handle_edit_task(variables, user_id)
         elif op_type == "mutation" and field == "deleteTask":
@@ -456,9 +463,32 @@ async def _handle_add_task(variables: dict, user_id: str) -> dict:
     if not content:
         return _err("content is required")
     today = datetime.now(timezone.utc).date().isoformat()
-    date  = variables.get("date", today)
-    tasks = tasks_module.save_tasks([content], date, user_id)
+    date              = variables.get("date", today) or today
+    recurrence        = variables.get("recurrence") or None
+    recurrence_end    = variables.get("recurrenceEndDate") or None
+    tasks = tasks_module.save_tasks(
+        [content], date, user_id,
+        recurrence=recurrence,
+        recurrence_end_date=recurrence_end,
+    )
     return _ok({"addTask": tasks[0] if tasks else None})
+
+
+async def _handle_add_reminder(variables: dict, user_id: str) -> dict:
+    content = variables.get("content", "").strip()
+    time_   = variables.get("time", "").strip()
+    if not content or not time_:
+        return _err("content and time are required")
+    today = datetime.now(timezone.utc).date().isoformat()
+    date           = variables.get("date", today) or today
+    recurrence     = variables.get("recurrence") or None
+    recurrence_end = variables.get("recurrenceEndDate") or None
+    task = tasks_module.save_reminder_task(
+        content, date, time_, user_id,
+        recurrence=recurrence,
+        recurrence_end_date=recurrence_end,
+    )
+    return _ok({"addReminder": task})
 
 
 async def _handle_edit_task(variables: dict, user_id: str) -> dict:
