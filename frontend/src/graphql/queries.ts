@@ -257,6 +257,7 @@ export const GET_DASHBOARD = gql`
           mediaType
           durationMin
           bookmarked
+          videoId
         }
       }
       learningPicks {
@@ -273,6 +274,7 @@ export const GET_DASHBOARD = gql`
           mediaType
           durationMin
           bookmarked
+          videoId
         }
       }
       localToday {

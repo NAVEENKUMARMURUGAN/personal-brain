@@ -1,33 +1,19 @@
 # channels.yaml — YouTube channel whitelist for the Learning Picks pipeline (P2).
 #
 # Fields:
-#   channel_id:    YouTube channel ID (from channel URL /channel/<ID>)
-#   name:          Display name
+#   channel_id:           YouTube channel ID (from channel URL /channel/<ID>)
+#   name:                 Display name
 #   uploads_playlist_id:  uploads playlist ID (UC... → UU...; replace first two chars)
-#   priority:      1 (highest) – 5 (lowest)
+#   priority:             1 (highest) – 5 (lowest)
 #
 # Note: uploads_playlist_id = channel_id with leading "UC" replaced by "UU"
 
 channels:
+  # ── Tier 1: Core GenAI Engineering ─────────────────────────
   - channel_id: UCnUYZLuoy1rq1aVMwx4aTzw
     name: Andrej Karpathy
     uploads_playlist_id: UUnUYZLuoy1rq1aVMwx4aTzw
     priority: 1
-
-  - channel_id: UCZHmQk67mSJgfCCTn7xBfew
-    name: AI Explained (2)
-    uploads_playlist_id: UUZHmQk67mSJgfCCTn7xBfew
-    priority: 1
-
-  - channel_id: UCbmNph6atAoGfqLoCL_duAg
-    name: Sentdex
-    uploads_playlist_id: UUbmNph6atAoGfqLoCL_duAg
-    priority: 2
-
-  - channel_id: UC0RhatS1pyxInC00YKjjBqQ
-    name: Computerphile
-    uploads_playlist_id: UU0RhatS1pyxInC00YKjjBqQ
-    priority: 3
 
   - channel_id: UCZHmQk67mSJgfCCTn7xBfew
     name: AI Explained
@@ -37,9 +23,46 @@ channels:
   - channel_id: UCVls1GmFKf6WlTraIb_IaJg
     name: Prompt Engineering
     uploads_playlist_id: UUVls1GmFKf6WlTraIb_IaJg
+    priority: 1
+
+  # ── Tier 2: Applied LLM / Agents / RAG ─────────────────────
+  - channel_id: UCyna_zxgrzvK5z4YGW9sMqA
+    name: Sam Witteveen
+    uploads_playlist_id: UUyna_zxgrzvK5z4YGW9sMqA
     priority: 2
+
+  - channel_id: UC7cs8q-gJRlGwj4A8OmCmXg
+    name: 1littlecoder
+    uploads_playlist_id: UU7cs8q-gJRlGwj4A8OmCmXg
+    priority: 2
+
+  # ── Tier 3: MLOps / Training / Research ─────────────────────
+  - channel_id: UCBmNph6atAoGfqLoCL_duAg
+    name: Sentdex
+    uploads_playlist_id: UUbmNph6atAoGfqLoCL_duAg
+    priority: 3
+
+  - channel_id: UCddiUEpeqJcYeBxX1IVBKvQ
+    name: Weights & Biases
+    uploads_playlist_id: UUddiUEpeqJcYeBxX1IVBKvQ
+    priority: 3
+
+  - channel_id: UC0RhatS1pyxInC00YKjjBqQ
+    name: Computerphile
+    uploads_playlist_id: UU0RhatS1pyxInC00YKjjBqQ
+    priority: 3
+
+  - channel_id: UC56n77l5rX3aIEbIBEMF55g
+    name: DeepLearning.AI
+    uploads_playlist_id: UU56n77l5rX3aIEbIBEMF55g
+    priority: 3
 
   - channel_id: UC4JX40jDee_tINbkjycV4Sg
     name: Tech With Tim
     uploads_playlist_id: UU4JX40jDee_tINbkjycV4Sg
-    priority: 3
+    priority: 4
+
+  - channel_id: UCnFmWEMRmXXqcEcdl5Nh4Uw
+    name: Yannic Kilcher
+    uploads_playlist_id: UUnFmWEMRmXXqcEcdl5Nh4Uw
+    priority: 2

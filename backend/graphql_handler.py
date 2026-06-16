@@ -246,6 +246,7 @@ type FeedItem {
   mediaType: String!
   durationMin: Int
   bookmarked: Boolean!
+  videoId: String
 }
 
 type LocalSection {
@@ -907,8 +908,26 @@ async def _handle_dashboard(user_id: str) -> dict:
     return _ok({"dashboard": dashboard})
 
 
+def _extract_youtube_id(url: str) -> Optional[str]:
+    """Extract YouTube video ID from a watch or short URL, or None for non-YouTube URLs."""
+    if not url:
+        return None
+    try:
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        if "youtube.com" in parsed.netloc:
+            vid = parse_qs(parsed.query).get("v", [None])[0]
+            return vid or None
+        if "youtu.be" in parsed.netloc:
+            return parsed.path.lstrip("/") or None
+    except Exception:
+        pass
+    return None
+
+
 def _serialize_feed_item(item: dict, bookmarked_ids: set) -> dict:
     """Convert a raw feed_items row to a GraphQL FeedItem shape."""
+    source_url = item.get("source_url") or ""
     return {
         "id": item.get("id", ""),
         "rank": item.get("rank") or 0,
@@ -917,10 +936,11 @@ def _serialize_feed_item(item: dict, bookmarked_ids: set) -> dict:
         "tag": item.get("tag") or "research",
         "summaryShort": item.get("summary_short") or "",
         "summaryDetail": item.get("summary_detail") or "",
-        "sourceUrl": item.get("source_url") or "",
+        "sourceUrl": source_url,
         "mediaType": item.get("media_type") or "article",
         "durationMin": item.get("duration_min"),
         "bookmarked": item.get("id", "") in bookmarked_ids,
+        "videoId": _extract_youtube_id(source_url),
     }
 
 

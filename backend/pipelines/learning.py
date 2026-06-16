@@ -228,6 +228,7 @@ async def _curate_with_claude(items: list[dict], today: str) -> Optional[list[di
                 "title": i["title"],
                 "source": i["source_name"],
                 "media_type": i["media_type"],
+                "duration_min": i.get("duration_min"),
                 "snippet": i.get("summary_raw", "")[:200],
             }
             for i in candidates
@@ -235,15 +236,21 @@ async def _curate_with_claude(items: list[dict], today: str) -> Optional[list[di
         indent=2,
     )
 
-    prompt = f"""You curate learning content for an AI engineer building LLM apps (RAG, agents, evals).
+    prompt = f"""You curate learning content for a GenAI engineer building LLM apps (RAG, agents, evals).
 Today is {today}.
 
-Score each item 1-10 for educational value. High scores = depth, code examples, evergreen,
-practical concepts, framework deep-dives. Low scores = surface-level announcements, hype, clickbait.
+SCORING RULES:
+- Score each item 1-10 for educational value.
+- High scores (8-10): deep technical content, code examples, evergreen concepts, framework deep-dives,
+  paper walkthroughs, architecture explanations, hands-on tutorials (15-90 min videos preferred).
+- Low scores (1-4): surface-level announcements, hype, clickbait, very short clips under 5 min.
+- IMPORTANT: If an item has media_type "video", add +1.5 to its base score — videos are strongly preferred.
+  Return ONLY video items in the final top-5 if there are 5 or more video candidates.
+  Videos between 10-90 minutes are ideal for deep learning.
 
 Also assign ONE tag from: RAG | agents | infra | research | fundamentals | evals | tools | architecture | local-llm
 
-Return ONLY valid JSON:
+Return ONLY valid JSON — exactly 5 items, sorted best first:
 {{
   "items": [
     {{

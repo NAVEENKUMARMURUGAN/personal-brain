@@ -677,6 +677,96 @@
 }
 
 /* ════════════════════════════════════════════════════════════
+   VIDEO FEED ROW — thumbnail + inline embed
+   ════════════════════════════════════════════════════════════ */
+
+/* Thumbnail in collapsed header */
+.feed-row__thumb-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 88px;
+  height: 50px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-muted);
+}
+
+.feed-row__thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Red play overlay */
+.feed-row__thumb-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: none;
+}
+
+.feed-row:hover .feed-row__thumb-play {
+  opacity: 1;
+}
+
+/* Video row slight accent on left border */
+.feed-row--video {
+  border-left: 2px solid rgba(96, 165, 250, 0.35);
+}
+
+/* 16:9 inline embed container */
+.video-embed {
+  position: relative;
+  padding-top: 56.25%; /* 16:9 */
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  margin-bottom: 14px;
+}
+
+.video-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* "Watch on YouTube" button — blue accent */
+.feed-row__acc-btn--watch {
+  border-color: rgba(96, 165, 250, 0.4);
+  color: var(--accent-blue);
+  background: rgba(96, 165, 250, 0.07);
+}
+
+.feed-row__acc-btn--watch:hover {
+  background: rgba(96, 165, 250, 0.14);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+/* Accordion padding adjustment — video embed fills to edges */
+.feed-row--video .feed-row__accordion {
+  padding-left: 18px;
+}
+
+/* Mobile: hide thumbnail on very small screens */
+@media (max-width: 480px) {
+  .feed-row__thumb-wrap {
+    display: none;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
    TRENDING REPOS GRID
    ════════════════════════════════════════════════════════════ */
 

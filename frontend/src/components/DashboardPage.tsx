@@ -23,6 +23,7 @@ interface FeedItem {
   id: string; rank: number; title: string; sourceName: string; tag: string
   summaryShort: string; summaryDetail: string; sourceUrl: string
   mediaType: string; durationMin?: number | null; bookmarked: boolean
+  videoId?: string | null
 }
 interface Repo { fullName: string; description: string; language?: string | null; starsGained7d: number; whyItMatters: string }
 interface LearningCardData { id: string; term: string; explanation: string; usageLine?: string | null; codeExample?: string | null; pathwayNode: string; ease: number; timesSeen: number; mastered: boolean }
@@ -229,15 +230,30 @@ function FeedRow({ item, openId, onToggle, onDiscuss, rank }: FeedRowProps) {
     }
   }, [bookmarked, saving, saveToBrain, item.id])
 
-  const mediaIcon = item.mediaType === 'video' ? '▶' : '◻'
-
+  const isVideo = item.mediaType === 'video' && !!item.videoId
+  const mediaIcon = isVideo ? '▶' : '◻'
   const tagClass = `feed-row__tag feed-row__tag--${item.tag.toLowerCase().replace(/[^a-z]/g, '-')}`
 
   return (
-    <div className="feed-row">
+    <div className={`feed-row${isVideo ? ' feed-row--video' : ''}`}>
       <div className="feed-row__header" onClick={() => onToggle(item.id)}>
         <span className="feed-row__rank">{String(rank).padStart(2, '0')}</span>
-        <span className="feed-row__media-icon">{mediaIcon}</span>
+
+        {/* Thumbnail for video items, icon for articles */}
+        {isVideo ? (
+          <div className="feed-row__thumb-wrap">
+            <img
+              className="feed-row__thumb"
+              src={`https://img.youtube.com/vi/${item.videoId}/mqdefault.jpg`}
+              alt=""
+              loading="lazy"
+            />
+            <span className="feed-row__thumb-play">▶</span>
+          </div>
+        ) : (
+          <span className="feed-row__media-icon">{mediaIcon}</span>
+        )}
+
         <div className="feed-row__title-block">
           <div className="feed-row__title" title={item.title}>{item.title}</div>
           <div className="feed-row__source">
@@ -261,16 +277,28 @@ function FeedRow({ item, openId, onToggle, onDiscuss, rank }: FeedRowProps) {
 
       {isOpen && (
         <div className="feed-row__accordion">
+          {/* Inline YouTube embed */}
+          {isVideo && (
+            <div className="video-embed">
+              <iframe
+                src={`https://www.youtube.com/embed/${item.videoId}?rel=0&modestbranding=1`}
+                title={item.title}
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          )}
+
           <div className="feed-row__digest">{item.summaryDetail || item.summaryShort}</div>
           <div className="feed-row__acc-actions">
             <a
-              className="feed-row__acc-btn"
+              className={`feed-row__acc-btn${isVideo ? ' feed-row__acc-btn--watch' : ''}`}
               href={item.sourceUrl}
               target="_blank"
               rel="noopener noreferrer"
               onClick={e => e.stopPropagation()}
             >
-              ↗ Read original
+              {isVideo ? '▶ Watch on YouTube' : '↗ Read original'}
             </a>
             <button
               className={`feed-row__acc-btn${bookmarked ? ' feed-row__acc-btn--saved' : ''}`}
