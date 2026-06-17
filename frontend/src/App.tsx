@@ -6,13 +6,14 @@ import KnowledgePage from './components/KnowledgePage'
 import LoginPage from './components/LoginPage'
 import SettingsPage from './components/SettingsPage'
 import DashboardPage from './components/DashboardPage'
+import ExplorePage from './components/ExplorePage'
 import { AuthProvider, useAuth } from './AuthContext'
 import { API_URL } from './config'
 import './App.css'
 
 type Theme = 'dark' | 'light'
 
-type NavPage = 'dashboard' | 'chat' | 'knowledge' | 'tasks' | 'settings'
+type NavPage = 'dashboard' | 'chat' | 'knowledge' | 'tasks' | 'settings' | 'explore'
 
 interface SystemEvent {
   level: 'OK' | 'INFO' | 'WARN'
@@ -42,6 +43,7 @@ const NAV_ITEMS: { id: NavPage; icon: string; label: string }[] = [
   { id: 'chat',      icon: '◈', label: 'Chat'       },
   { id: 'knowledge', icon: '◫', label: 'Knowledge'  },
   { id: 'tasks',     icon: '◻', label: 'Tasks'      },
+  { id: 'explore',   icon: '✦', label: 'Explore'    },
   { id: 'settings',  icon: '⚙', label: 'Settings'   },
 ]
 
@@ -355,6 +357,13 @@ function AppMain({ onLogout, user }: { onLogout: () => void; user: { name: strin
             <button className="app__hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
           </div>
           <KnowledgePage />
+        </div>
+      ) : page === 'explore' ? (
+        <div className="app__content app__content--full">
+          <div className="app__mobile-bar">
+            <button className="app__hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">☰</button>
+          </div>
+          <ExplorePage />
         </div>
       ) : page === 'settings' ? (
         <div className="app__content app__content--full app__content--scroll">

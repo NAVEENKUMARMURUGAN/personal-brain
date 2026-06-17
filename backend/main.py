@@ -21,6 +21,7 @@ import dashboard_db
 import graphql_handler
 import auth
 import telegram_bot
+import explore_db
 from context_manager import ContextManager
 
 logging.basicConfig(level=logging.INFO)
@@ -126,6 +127,7 @@ async def startup():
     auth.ensure_users_table()
     telegram_bot.ensure_telegram_table()
     dashboard_db.ensure_dashboard_tables()
+    explore_db.ensure_table()
     try:
         import vault as vault_module
         vault_module.ensure_collection()

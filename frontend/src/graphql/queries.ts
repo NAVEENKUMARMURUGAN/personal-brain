@@ -394,3 +394,56 @@ export const REFRESH_LEARNING_PICKS = gql`
     }
   }
 `
+
+// ── Topic Explorer ─────────────────────────────────────────────
+
+export const EXPLORE_TOPIC = gql`
+  mutation ExploreTopic($topic: String!, $regenerate: Boolean) {
+    exploreTopic(topic: $topic, regenerate: $regenerate) {
+      id
+      topic
+      topicSlug
+      overviewJson
+      mindmapMermaid
+      flashcardsJson
+      quizJson
+      relatedMemoriesJson
+      createdAt
+      cached
+    }
+  }
+`
+
+export const SURPRISE_ME = gql`
+  mutation SurpriseMe {
+    surpriseMe
+  }
+`
+
+export const SAVE_EXPLORATION_SECTION = gql`
+  mutation SaveExplorationSection($topic: String!, $content: String!, $category: String!) {
+    saveExplorationSection(topic: $topic, content: $content, category: $category) {
+      id
+      content
+      category
+      createdAt
+    }
+  }
+`
+
+export const LIST_EXPLORATIONS = gql`
+  query ListExplorations($limit: Int) {
+    listExplorations(limit: $limit) {
+      id
+      topic
+      topicSlug
+      createdAt
+    }
+  }
+`
+
+export const DELETE_EXPLORATION = gql`
+  mutation DeleteExploration($topicSlug: String!) {
+    deleteExploration(topicSlug: $topicSlug)
+  }
+`

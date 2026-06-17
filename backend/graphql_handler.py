@@ -14,6 +14,8 @@ import dashboard_db
 import weather as weather_module
 import claude
 import auth
+import explore_db
+from pipelines import explore as explore_pipeline
 from context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
@@ -318,6 +320,41 @@ enum TriageAction {
   later
   archive
 }
+
+# ── Topic Explorer ─────────────────────────────────────────────
+
+type TopicExploration {
+  id: ID!
+  topic: String!
+  topicSlug: String!
+  overviewJson: String!
+  mindmapMermaid: String!
+  flashcardsJson: String!
+  quizJson: String!
+  relatedMemoriesJson: String
+  createdAt: String!
+  regeneratedAt: String
+  cached: Boolean!
+}
+
+type ExplorationMeta {
+  id: ID!
+  topic: String!
+  topicSlug: String!
+  createdAt: String!
+  regeneratedAt: String
+}
+
+extend type Query {
+  listExplorations(limit: Int): [ExplorationMeta!]!
+}
+
+extend type Mutation {
+  exploreTopic(topic: String!, regenerate: Boolean): TopicExploration
+  surpriseMe: String!
+  saveExplorationSection(topic: String!, content: String!, category: String!): Memory!
+  deleteExploration(topicSlug: String!): Boolean!
+}
 """
 
 
@@ -427,6 +464,17 @@ async def handle(request: Request) -> JSONResponse:
             result = await _handle_vault_items(user_id)
         elif op_type == "query" and field == "searchVault":
             result = await _handle_search_vault(variables, user_id)
+        # ── Topic Explorer ─────────────────────────────────────
+        elif op_type == "mutation" and field == "exploreTopic":
+            result = await _handle_explore_topic(variables, user_id)
+        elif op_type == "mutation" and field == "surpriseMe":
+            result = await _handle_surprise_me(user_id)
+        elif op_type == "mutation" and field == "saveExplorationSection":
+            result = await _handle_save_exploration_section(variables, user_id)
+        elif op_type == "mutation" and field == "deleteExploration":
+            result = await _handle_delete_exploration(variables, user_id)
+        elif op_type == "query" and field == "listExplorations":
+            result = await _handle_list_explorations(variables, user_id)
         else:
             logger.error("Unknown operation: op=%s field=%s query=%r", op_type, field, query)
             return JSONResponse(_err(f"Unknown operation: {field}"), status_code=400)
@@ -1226,3 +1274,93 @@ async def _handle_search_vault(variables: dict, user_id: str) -> dict:
     except Exception as e:
         logger.error("searchVault error: %s", e)
         return _err(str(e))
+
+
+# ── Topic Explorer handlers ────────────────────────────────────────────────────
+
+def _serialize_exploration(row: dict, cached: bool) -> dict:
+    content = row.get("content", {})
+    return {
+        "id": row["id"],
+        "topic": row["topic"],
+        "topicSlug": row["topic_slug"],
+        "overviewJson": json.dumps(content.get("overview", {})),
+        "mindmapMermaid": content.get("mindmap_mermaid", ""),
+        "flashcardsJson": json.dumps(content.get("flashcards", [])),
+        "quizJson": json.dumps(content.get("quiz", [])),
+        "relatedMemoriesJson": json.dumps(content.get("related_memories", [])),
+        "createdAt": row.get("created_at", ""),
+        "regeneratedAt": row.get("regenerated_at"),
+        "cached": cached,
+    }
+
+
+async def _handle_explore_topic(variables: dict, user_id: str) -> dict:
+    topic = (variables.get("topic") or "").strip()
+    if not topic:
+        return _err("topic is required")
+    regenerate = bool(variables.get("regenerate", False))
+
+    row = await explore_pipeline.generate_exploration(
+        topic=topic,
+        user_id=user_id,
+        force=regenerate,
+    )
+    if row is None:
+        return _err("Failed to generate exploration — please try again")
+
+    slug = explore_db.slugify(topic)
+    was_cached = not regenerate and row.get("regenerated_at") is None
+    # If force=True we re-generated; mark as not cached
+    cached_flag = (not regenerate) and (explore_db.get_exploration(user_id, slug) is not None and not regenerate)
+
+    return _ok({"exploreTopic": _serialize_exploration(row, cached=not regenerate)})
+
+
+async def _handle_surprise_me(user_id: str) -> dict:
+    topic = explore_pipeline.get_surprise_topic(user_id)
+    return _ok({"surpriseMe": topic})
+
+
+async def _handle_save_exploration_section(variables: dict, user_id: str) -> dict:
+    topic = (variables.get("topic") or "").strip()
+    content = (variables.get("content") or "").strip()
+    category = (variables.get("category") or f"Explore — {topic}").strip()
+    if not topic or not content:
+        return _err("topic and content are required")
+
+    memory_id = str(uuid.uuid4())
+    brain.add_memory(content, category, user_id, memory_id=memory_id)
+    now = datetime.now(timezone.utc).isoformat()
+    return _ok({
+        "saveExplorationSection": {
+            "id": memory_id,
+            "content": content,
+            "category": category,
+            "createdAt": now,
+        }
+    })
+
+
+async def _handle_delete_exploration(variables: dict, user_id: str) -> dict:
+    slug = (variables.get("topicSlug") or "").strip()
+    if not slug:
+        return _err("topicSlug is required")
+    deleted = explore_db.delete_exploration(user_id, slug)
+    return _ok({"deleteExploration": deleted})
+
+
+async def _handle_list_explorations(variables: dict, user_id: str) -> dict:
+    limit = int(variables.get("limit") or 20)
+    rows = explore_db.list_explorations(user_id, limit=limit)
+    items = [
+        {
+            "id": r["id"],
+            "topic": r["topic"],
+            "topicSlug": r["topic_slug"],
+            "createdAt": r["created_at"],
+            "regeneratedAt": r.get("regenerated_at"),
+        }
+        for r in rows
+    ]
+    return _ok({"listExplorations": items})
