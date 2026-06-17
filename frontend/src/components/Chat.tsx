@@ -315,10 +315,6 @@ export default function Chat({ onDrillCategory, onAgentAction, initialMessage, o
 
   // ── Render ─────────────────────────────────────────────────
 
-  const micLabel =
-    recordingState === 'recording' ? '⏹' :
-    recordingState === 'transcribing' ? '…' : '🎙'
-
   const micTitle =
     recordingState === 'recording' ? 'Stop recording' :
     recordingState === 'transcribing' ? 'Transcribing…' : 'Record voice note'
@@ -451,7 +447,27 @@ export default function Chat({ onDrillCategory, onAgentAction, initialMessage, o
             title={micTitle}
             aria-label={micTitle}
           >
-            {micLabel === '🎙' ? '🎙' : micLabel}
+            {recordingState === 'recording' ? (
+              // Stop square
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+                <rect x="2" y="2" width="10" height="10" rx="2"/>
+              </svg>
+            ) : recordingState === 'transcribing' ? (
+              // Spinner dots
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+                <circle cx="3" cy="7" r="1.5" opacity="0.4"/>
+                <circle cx="7" cy="7" r="1.5" opacity="0.7"/>
+                <circle cx="11" cy="7" r="1.5"/>
+              </svg>
+            ) : (
+              // Waveform mic
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <rect x="4.5" y="1" width="5" height="7" rx="2.5" fill="currentColor" stroke="none"/>
+                <path d="M2 7a5 5 0 0 0 10 0"/>
+                <line x1="7" y1="12" x2="7" y2="14"/>
+                <line x1="4.5" y1="14" x2="9.5" y2="14"/>
+              </svg>
+            )}
           </button>
           <button
             className="chat__kbd-btn"
