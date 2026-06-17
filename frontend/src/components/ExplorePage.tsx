@@ -320,12 +320,7 @@ export default function ExplorePage() {
             <div className="explore__skeleton-bar" style={{ width: '75%' }} />
             <div className="explore__skeleton-bar" style={{ width: '40%' }} />
             <div className="explore__skeleton-bar" style={{ width: '65%' }} />
-            <div className="explore__skeleton-footer">
-              <p className="explore__skeleton-hint">Searching the web + generating your learning package…</p>
-              <button className="explore__btn explore__btn--stop explore__btn--sm" onClick={handleStop}>
-                ⏹ Stop
-              </button>
-            </div>
+            <p className="explore__skeleton-hint">Searching the web + generating your learning package…</p>
           </div>
         )}
 
@@ -479,7 +474,7 @@ function OverviewTab({
           className={`explore__mode-btn ${mode === 'engineer' ? 'explore__mode-btn--active' : ''}`}
           onClick={() => onModeChange('engineer')}
         >
-          ⚙ Engineer
+          ⚙ Student
         </button>
       </div>
 

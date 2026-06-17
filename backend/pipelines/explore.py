@@ -215,12 +215,12 @@ Return ONLY valid JSON with this exact structure (pure JSON, no markdown fences,
   }},
 
   "engineer": {{
-    "deep_dive": "4-6 paragraphs for an experienced engineer. Cover: internal mechanics / how it actually works under the hood, time/space complexity or performance characteristics where relevant, key design decisions and the trade-offs behind them, edge cases and failure modes, relationship to adjacent concepts. Assume the reader knows CS fundamentals. Use correct technical terminology. Reference specific algorithms, papers, or specs where appropriate.",
+    "deep_dive": "4-6 paragraphs for an engineering student (3rd/4th year undergrad or early grad). Cover: how it works step by step under the hood, time/space complexity where relevant, key design decisions and WHY they were made, common mistakes beginners make and how to avoid them, and how this connects to familiar CS concepts (data structures, algorithms, OS, networks). Define technical jargon the first time you use it. Build intuition before formalism — explain the 'why' before the 'how'. Use short worked examples or analogies to cement understanding.",
     "internals": [
-      {{"aspect": "Aspect name (e.g. Memory Layout, Concurrency Model)", "detail": "2-3 sentences of technical depth."}}
+      {{"aspect": "Aspect name (e.g. How Data Flows, Memory Layout)", "detail": "2-3 sentences. Technical but accessible — imagine a smart CS junior who knows theory but hasn't seen this in production yet."}}
     ],
     "trade_offs": [
-      {{"pro": "Advantage phrased technically", "con": "Corresponding limitation or cost"}}
+      {{"pro": "Concrete advantage — include a brief reason why this matters", "con": "Corresponding cost or limitation — include when this bites you"}}
     ]
   }},
 
@@ -263,9 +263,10 @@ overview:
 - misconceptions: exactly 3 items.
 
 engineer:
-- deep_dive: minimum 4 paragraphs separated by \\n\\n. No hand-waving — be specific.
-- internals: 3-5 aspects. Each aspect is a distinct technical dimension (not a repeat of deep_dive).
-- trade_offs: 3-4 pairs. Each pro and con must be a specific technical claim, not generic.
+- Audience is an engineering student, NOT a senior engineer. Build intuition, define terms, use examples.
+- deep_dive: minimum 4 paragraphs separated by \\n\\n. No hand-waving — explain the why behind every design choice. Use a short worked example or analogy in at least one paragraph.
+- internals: 3-5 aspects. Each must be a distinct technical dimension. Explain each as if to a smart CS junior seeing it for the first time.
+- trade_offs: 3-4 pairs. Each pro/con must be specific (not "it's fast" — say why and when).
 
 use_cases:
 - exactly 3 items.
