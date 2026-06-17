@@ -65,6 +65,11 @@ interface RelatedMemory {
   category: string
 }
 
+interface WebSource {
+  title: string
+  url: string
+}
+
 interface ExplorationResult {
   topic: string
   topicSlug: string
@@ -76,6 +81,7 @@ interface ExplorationResult {
   flashcards: Flashcard[]
   quiz: QuizQuestion[]
   related_memories: RelatedMemory[]
+  web_sources: WebSource[]
   cached: boolean
   createdAt: string
 }
@@ -102,9 +108,15 @@ export default function ExplorePage() {
   const [savedSections, setSavedSections] = useState<Set<string>>(new Set())
   const [saveMessage, setSaveMessage] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [isGenerating, setIsGenerating] = useState(false)
 
-  const [exploreTopic, { loading: exploringLoading, error: exploringError }] = useMutation(EXPLORE_TOPIC)
-  const [surpriseMe, { loading: surpriseLoading }] = useMutation(SURPRISE_ME)
+  // Each operation (explore / history load / stop) increments this.
+  // Any in-flight async block checks its captured ID against the ref — if they
+  // differ, a newer operation has taken over and the result is discarded.
+  const generationIdRef = useRef(0)
+
+  const [exploreTopic, { error: exploringError }] = useMutation(EXPLORE_TOPIC)
+  const [surpriseMe] = useMutation(SURPRISE_ME)
   const [saveSection, { loading: saveLoading }] = useMutation(SAVE_EXPLORATION_SECTION)
 
   const { data: historyData, refetch: refetchHistory } = useQuery(LIST_EXPLORATIONS, {
@@ -113,7 +125,6 @@ export default function ExplorePage() {
   })
 
   const history: HistoryItem[] = historyData?.listExplorations ?? []
-  const loading = exploringLoading || surpriseLoading
 
   const parseExploration = (raw: any): ExplorationResult => ({
     topic: raw.topic,
@@ -126,13 +137,22 @@ export default function ExplorePage() {
     flashcards: JSON.parse(raw.flashcardsJson),
     quiz: JSON.parse(raw.quizJson),
     related_memories: raw.relatedMemoriesJson ? JSON.parse(raw.relatedMemoriesJson) : [],
+    web_sources: raw.webSourcesJson ? JSON.parse(raw.webSourcesJson) : [],
     cached: raw.cached,
     createdAt: raw.createdAt,
   })
 
+  const handleStop = useCallback(() => {
+    generationIdRef.current++   // invalidate any in-flight operation
+    setIsGenerating(false)
+  }, [])
+
   const handleExplore = useCallback(async (topic: string, regenerate = false) => {
     const t = topic.trim()
     if (!t) return
+
+    const myId = ++generationIdRef.current
+    setIsGenerating(true)
     setTopicInput(t)
     setExploration(null)
     setActiveTab('overview')
@@ -142,27 +162,48 @@ export default function ExplorePage() {
 
     try {
       const { data } = await exploreTopic({ variables: { topic: t, regenerate } })
+      if (generationIdRef.current !== myId) return   // superseded by stop / history click
       if (data?.exploreTopic) {
         setExploration(parseExploration(data.exploreTopic))
         refetchHistory()
       }
     } catch (err) {
-      console.error('ExplorePage explore error:', err)
+      if (generationIdRef.current === myId) console.error('ExplorePage explore error:', err)
+    } finally {
+      if (generationIdRef.current === myId) setIsGenerating(false)
     }
   }, [exploreTopic, refetchHistory])
 
   const handleSurpriseMe = useCallback(async () => {
     try {
       const { data } = await surpriseMe()
-      if (data?.surpriseMe) await handleExplore(data.surpriseMe)
+      if (data?.surpriseMe) handleExplore(data.surpriseMe)
     } catch (err) {
       console.error('ExplorePage surpriseMe error:', err)
     }
   }, [surpriseMe, handleExplore])
 
+  // History clicks load from cache — no skeleton, no blanking the current view.
+  // Increments generation ID so any in-flight new exploration is discarded.
   const handleHistoryClick = useCallback(async (item: HistoryItem) => {
-    await handleExplore(item.topic)
-  }, [handleExplore])
+    const myId = ++generationIdRef.current
+    setIsGenerating(false)   // stop skeleton if a generation was running
+    setTopicInput(item.topic)
+    setActiveTab('overview')
+    setOverviewMode('layman')
+    setSavedSections(new Set())
+    setSaveMessage('')
+    // Do NOT clear exploration — current content stays visible while cache loads
+    try {
+      const { data } = await exploreTopic({ variables: { topic: item.topic, regenerate: false } })
+      if (generationIdRef.current !== myId) return
+      if (data?.exploreTopic) {
+        setExploration(parseExploration(data.exploreTopic))
+      }
+    } catch (err) {
+      if (generationIdRef.current === myId) console.error('History load error:', err)
+    }
+  }, [exploreTopic])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') handleExplore(topicInput)
@@ -238,42 +279,58 @@ export default function ExplorePage() {
               value={topicInput}
               onChange={e => setTopicInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={loading}
+              disabled={isGenerating}
             />
-            <button
-              className="explore__btn explore__btn--primary"
-              onClick={() => handleExplore(topicInput)}
-              disabled={loading || !topicInput.trim()}
-            >
-              {loading ? '…' : 'Explore'}
-            </button>
-            <button
-              className="explore__btn explore__btn--surprise"
-              onClick={handleSurpriseMe}
-              disabled={loading}
-              title="Pick a random topic from your brain"
-            >
-              🎲 Surprise Me
-            </button>
+            {isGenerating ? (
+              <button
+                className="explore__btn explore__btn--stop"
+                onClick={handleStop}
+                title="Cancel and go back"
+              >
+                ⏹ Stop
+              </button>
+            ) : (
+              <>
+                <button
+                  className="explore__btn explore__btn--primary"
+                  onClick={() => handleExplore(topicInput)}
+                  disabled={!topicInput.trim()}
+                >
+                  Explore
+                </button>
+                <button
+                  className="explore__btn explore__btn--surprise"
+                  onClick={handleSurpriseMe}
+                  title="Pick a random topic from your brain"
+                >
+                  🎲 Surprise Me
+                </button>
+              </>
+            )}
           </div>
-          {exploringError && (
+          {exploringError && !isGenerating && (
             <p className="explore__error">{exploringError.message}</p>
           )}
         </div>
 
         {/* Loading skeleton */}
-        {loading && (
+        {isGenerating && (
           <div className="explore__skeleton">
             <div className="explore__skeleton-bar" style={{ width: '55%' }} />
             <div className="explore__skeleton-bar" style={{ width: '75%' }} />
             <div className="explore__skeleton-bar" style={{ width: '40%' }} />
             <div className="explore__skeleton-bar" style={{ width: '65%' }} />
-            <p className="explore__skeleton-hint">Generating your learning package — this takes ~15 seconds…</p>
+            <div className="explore__skeleton-footer">
+              <p className="explore__skeleton-hint">Searching the web + generating your learning package…</p>
+              <button className="explore__btn explore__btn--stop explore__btn--sm" onClick={handleStop}>
+                ⏹ Stop
+              </button>
+            </div>
           </div>
         )}
 
         {/* Results */}
-        {!loading && exploration && (
+        {!isGenerating && exploration && (
           <div className="explore__result">
             <div className="explore__result-header">
               <h2 className="explore__result-topic">{exploration.topic}</h2>
@@ -344,7 +401,7 @@ export default function ExplorePage() {
         )}
 
         {/* Empty state */}
-        {!loading && !exploration && (
+        {!isGenerating && !exploration && (
           <div className="explore__empty">
             <div className="explore__empty-icon">✦</div>
             <p>Enter a topic above or hit <strong>Surprise Me</strong> to explore something from your brain.</p>

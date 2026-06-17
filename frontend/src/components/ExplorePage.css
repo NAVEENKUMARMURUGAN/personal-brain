@@ -218,6 +218,15 @@
   color: var(--text-primary, #e0e0e0);
 }
 
+.explore__btn--stop {
+  background: transparent;
+  color: #e05c5c;
+  border-color: #e05c5c;
+}
+.explore__btn--stop:hover {
+  background: rgba(224, 92, 92, 0.1);
+}
+
 .explore__btn--sm {
   padding: 0.35rem 0.65rem;
   font-size: 0.76rem;
@@ -242,10 +251,18 @@
   animation: skeleton-shimmer 1.4s infinite;
 }
 
+.explore__skeleton-footer {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+
 .explore__skeleton-hint {
   font-size: 0.78rem;
   color: var(--text-faint, #555);
-  margin: 0.25rem 0 0;
+  margin: 0;
+  flex: 1;
 }
 
 @keyframes skeleton-shimmer {

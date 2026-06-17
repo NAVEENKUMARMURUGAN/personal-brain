@@ -411,6 +411,7 @@ export const EXPLORE_TOPIC = gql`
       flashcardsJson
       quizJson
       relatedMemoriesJson
+      webSourcesJson
       createdAt
       cached
     }

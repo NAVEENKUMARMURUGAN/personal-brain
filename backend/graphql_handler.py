@@ -335,6 +335,7 @@ type TopicExploration {
   flashcardsJson: String!
   quizJson: String!
   relatedMemoriesJson: String
+  webSourcesJson: String
   createdAt: String!
   regeneratedAt: String
   cached: Boolean!
@@ -1295,6 +1296,7 @@ def _serialize_exploration(row: dict, cached: bool) -> dict:
         "flashcardsJson": json.dumps(content.get("flashcards", [])),
         "quizJson": json.dumps(content.get("quiz", [])),
         "relatedMemoriesJson": json.dumps(content.get("related_memories", [])),
+        "webSourcesJson": json.dumps(content.get("web_sources", [])),
         "createdAt": row.get("created_at", ""),
         "regeneratedAt": row.get("regenerated_at"),
         "cached": cached,

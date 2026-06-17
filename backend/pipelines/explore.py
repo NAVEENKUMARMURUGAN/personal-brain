@@ -15,6 +15,7 @@ Context-aware: injects user's existing related memories into the prompt so the
 explanation references what they already know.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ import anthropic
 
 import brain
 import explore_db
+from pipelines.web_search import search_web, format_for_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +95,18 @@ async def generate_exploration(
         lines = [f"- [{m['category']}] {m['content'][:120]}" for m in relevant]
         existing_knowledge = "\n".join(lines)
 
-    user_prompt = _build_prompt(topic, existing_knowledge)
+    # Web search for current information (runs in thread pool — requests is sync)
+    web_results = await asyncio.get_event_loop().run_in_executor(
+        None, lambda: search_web(topic, max_results=5)
+    )
+    web_context = format_for_prompt(web_results)
+    if web_context:
+        logger.info("Explore web search: %d results for %r", len(web_results), topic)
+    else:
+        logger.info("Explore web search: no results for %r (will use training data only)", topic)
+
+    user_prompt = _build_prompt(topic, existing_knowledge, web_context)
+
 
     logger.info("Explore generating: user=%s topic=%r", user_id[:8], topic)
 
@@ -124,14 +137,17 @@ async def generate_exploration(
             logger.error("Explore: missing keys %s for topic %r", missing, topic)
             return None
 
-        # Attach related memories to overview for frontend "what you already know" block
-        if relevant:
-            content["related_memories"] = [
-                {"content": m["content"][:200], "category": m["category"]}
-                for m in relevant
-            ]
-        else:
-            content["related_memories"] = []
+        # Attach related memories for "what you already know" block
+        content["related_memories"] = [
+            {"content": m["content"][:200], "category": m["category"]}
+            for m in relevant
+        ]
+
+        # Attach web sources so frontend can show "Sources searched"
+        content["web_sources"] = [
+            {"title": r["title"], "url": r["url"]}
+            for r in web_results
+        ]
 
         result = explore_db.upsert_exploration(user_id, topic, slug, content)
         logger.info("Explore stored: user=%s topic=%r slug=%s", user_id[:8], topic, slug)
@@ -164,7 +180,7 @@ def get_surprise_topic(user_id: str) -> str:
     return random.choice(SURPRISE_SEED_TOPICS)
 
 
-def _build_prompt(topic: str, existing_knowledge: str) -> str:
+def _build_prompt(topic: str, existing_knowledge: str, web_context: str = "") -> str:
     existing_block = ""
     if existing_knowledge:
         existing_block = f"""The user already knows these related things — reference them briefly in the eli5 section:
@@ -172,9 +188,15 @@ def _build_prompt(topic: str, existing_knowledge: str) -> str:
 
 """
 
+    web_block = ""
+    if web_context:
+        web_block = f"""{web_context}
+
+"""
+
     safe_topic = topic.replace('"', '\\"')
 
-    return f"""{existing_block}Create a complete learning package for: "{safe_topic}"
+    return f"""{web_block}{existing_block}Create a complete learning package for: "{safe_topic}"
 
 Return ONLY valid JSON with this exact structure (pure JSON, no markdown fences, no trailing commas):
 
