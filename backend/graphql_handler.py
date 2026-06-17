@@ -328,6 +328,9 @@ type TopicExploration {
   topic: String!
   topicSlug: String!
   overviewJson: String!
+  engineerJson: String!
+  useCasesJson: String!
+  sampleImplementationJson: String
   mindmapMermaid: String!
   flashcardsJson: String!
   quizJson: String!
@@ -1285,6 +1288,9 @@ def _serialize_exploration(row: dict, cached: bool) -> dict:
         "topic": row["topic"],
         "topicSlug": row["topic_slug"],
         "overviewJson": json.dumps(content.get("overview", {})),
+        "engineerJson": json.dumps(content.get("engineer", {})),
+        "useCasesJson": json.dumps(content.get("use_cases", [])),
+        "sampleImplementationJson": json.dumps(content.get("sample_implementation")),
         "mindmapMermaid": content.get("mindmap_mermaid", ""),
         "flashcardsJson": json.dumps(content.get("flashcards", [])),
         "quizJson": json.dumps(content.get("quiz", [])),
@@ -1329,15 +1335,13 @@ async def _handle_save_exploration_section(variables: dict, user_id: str) -> dic
     if not topic or not content:
         return _err("topic and content are required")
 
-    memory_id = str(uuid.uuid4())
-    brain.add_memory(content, category, user_id, memory_id=memory_id)
-    now = datetime.now(timezone.utc).isoformat()
+    result = brain.save_memory(content, category, user_id)
     return _ok({
         "saveExplorationSection": {
-            "id": memory_id,
+            "id": result["id"],
             "content": content,
             "category": category,
-            "createdAt": now,
+            "createdAt": result["createdAt"],
         }
     })
 

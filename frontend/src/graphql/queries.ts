@@ -404,6 +404,9 @@ export const EXPLORE_TOPIC = gql`
       topic
       topicSlug
       overviewJson
+      engineerJson
+      useCasesJson
+      sampleImplementationJson
       mindmapMermaid
       flashcardsJson
       quizJson

@@ -3,6 +3,9 @@ pipelines/explore.py — Topic Explorer generation pipeline.
 
 Given a topic string, produces a structured learning package:
   - ELI5 overview with key concepts, why it matters, misconceptions
+  - Engineer-level deep dive (internals, complexity, trade-offs)
+  - 2-3 real-world use cases with how-it-applies context
+  - Sample implementation (code snippet, null if non-programming topic)
   - Mermaid mind map syntax
   - 8 flashcards (Q&A pairs)
   - 5 quiz questions (MCQ with explanations)
@@ -97,7 +100,7 @@ async def generate_exploration(
     try:
         response = _client.messages.create(
             model=MODEL,
-            max_tokens=8000,
+            max_tokens=12000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -115,7 +118,7 @@ async def generate_exploration(
         content = json.loads(raw)
 
         # Validate required keys
-        required = {"overview", "mindmap_mermaid", "flashcards", "quiz"}
+        required = {"overview", "engineer", "use_cases", "mindmap_mermaid", "flashcards", "quiz"}
         missing = required - set(content.keys())
         if missing:
             logger.error("Explore: missing keys %s for topic %r", missing, topic)
@@ -169,45 +172,96 @@ def _build_prompt(topic: str, existing_knowledge: str) -> str:
 
 """
 
-    # Escape braces in topic for f-string safety
     safe_topic = topic.replace('"', '\\"')
 
     return f"""{existing_block}Create a complete learning package for: "{safe_topic}"
 
-Return ONLY valid JSON with this exact structure:
+Return ONLY valid JSON with this exact structure (pure JSON, no markdown fences, no trailing commas):
 
 {{
   "topic": "{safe_topic}",
+
   "overview": {{
-    "eli5": "3-4 paragraphs. Start with the simplest possible mental model. Use analogies. No jargon without definition. If the user already knows related things, briefly reference them in the first paragraph to build on their existing knowledge.",
+    "eli5": "3-4 paragraphs explaining the topic to a complete newcomer. Start with the simplest possible mental model using an everyday analogy. Define every term the first time you use it. If the user already knows related things from context, reference them in paragraph 1 to build a bridge.",
     "key_concepts": [
-      {{"term": "concept name", "definition": "one sentence, plain English, no jargon"}}
+      {{"term": "concept name", "definition": "one sentence, plain English only"}}
     ],
-    "why_it_matters": "2-3 sentences on real-world impact and relevance.",
+    "why_it_matters": "2-3 sentences. Real-world impact. Why someone should care.",
     "misconceptions": [
-      "Wrong belief people have — and why it is actually incorrect. (one sentence each)"
+      "One common wrong belief — followed immediately by why it is wrong. (one sentence each)"
     ]
   }},
-  "mindmap_mermaid": "mindmap\\n  root(({safe_topic}))\\n    Branch1\\n      leaf1\\n      leaf2\\n    Branch2\\n      leaf3\\n      leaf4",
-  "flashcards": [
-    {{"question": "Question text?", "answer": "Answer text."}}
+
+  "engineer": {{
+    "deep_dive": "4-6 paragraphs for an experienced engineer. Cover: internal mechanics / how it actually works under the hood, time/space complexity or performance characteristics where relevant, key design decisions and the trade-offs behind them, edge cases and failure modes, relationship to adjacent concepts. Assume the reader knows CS fundamentals. Use correct technical terminology. Reference specific algorithms, papers, or specs where appropriate.",
+    "internals": [
+      {{"aspect": "Aspect name (e.g. Memory Layout, Concurrency Model)", "detail": "2-3 sentences of technical depth."}}
+    ],
+    "trade_offs": [
+      {{"pro": "Advantage phrased technically", "con": "Corresponding limitation or cost"}}
+    ]
+  }},
+
+  "use_cases": [
+    {{
+      "title": "Short title (e.g. GPT-4 pre-training)",
+      "company_or_context": "Where/who uses this (e.g. OpenAI, Netflix, Linux kernel)",
+      "description": "2-3 sentences. How this topic is applied in this specific context. What problem it solves. What results it achieves. Be concrete — cite real numbers or outcomes if known."
+    }}
   ],
+
+  "sample_implementation": {{
+    "applicable": true,
+    "language": "python",
+    "description": "One sentence on what this snippet demonstrates.",
+    "code": "# Minimal but complete runnable example\\n# showing the core idea of the topic\\n# Use clear variable names, add comments explaining non-obvious lines\\n# Maximum 40 lines"
+  }},
+
+  "mindmap_mermaid": "mindmap\\n  root(({safe_topic}))\\n    Branch1\\n      leaf1\\n      leaf2\\n    Branch2\\n      leaf3\\n      leaf4",
+
+  "flashcards": [
+    {{"question": "Question?", "answer": "Answer."}}
+  ],
+
   "quiz": [
     {{
-      "question": "Question text?",
-      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "question": "Question?",
+      "options": ["A", "B", "C", "D"],
       "correct_index": 0,
-      "explanation": "Why option A is correct. Why B, C, D are wrong."
+      "explanation": "Why A is correct. Why B, C, D are wrong."
     }}
   ]
 }}
 
-RULES — follow exactly:
-- overview.eli5: minimum 3 paragraphs separated by \\n\\n. Real analogies only.
-- overview.key_concepts: 4-6 items. Only genuinely important terms.
-- overview.misconceptions: exactly 3 items.
-- mindmap_mermaid: valid Mermaid mindmap syntax. Use (()) for root, square brackets for branches, plain text for leaves. 4-6 branches, 2-3 leaves each. No special characters in node labels.
-- flashcards: exactly 8 cards. Mix recall questions (what is X?) with application questions (when would you use X?). Last 2 should be harder.
-- quiz: exactly 5 questions. First 2 easy, next 2 medium, last 1 hard. 4 options each. correct_index is 0-3 (index into options array).
-- Output pure JSON only. No markdown. No code fences. No trailing commas.
+RULES — every rule is mandatory:
+
+overview:
+- eli5: minimum 3 paragraphs separated by \\n\\n. Analogies must be to everyday objects/experiences.
+- key_concepts: 4-6 items. Only terms a newcomer would not know.
+- misconceptions: exactly 3 items.
+
+engineer:
+- deep_dive: minimum 4 paragraphs separated by \\n\\n. No hand-waving — be specific.
+- internals: 3-5 aspects. Each aspect is a distinct technical dimension (not a repeat of deep_dive).
+- trade_offs: 3-4 pairs. Each pro and con must be a specific technical claim, not generic.
+
+use_cases:
+- exactly 3 items.
+- Must be real products, companies, or well-known systems — not made-up examples.
+- description must say HOW the topic is used, not just THAT it is used.
+
+sample_implementation:
+- If the topic has a natural code representation (algorithms, data structures, protocols, ML concepts, systems), set applicable=true and write real runnable code.
+- If the topic is non-technical or abstract (e.g. Black holes, Renaissance art), set applicable=false and code=null.
+- Language: prefer Python unless the topic is inherently tied to another language (e.g. Linux syscalls → C).
+- Code must be correct, minimal, and commented.
+
+mindmap_mermaid:
+- Valid Mermaid mindmap syntax. Root uses (()). Branches use plain text. 4-6 branches, 2-3 leaves each.
+- No special characters in node labels (no colons, parentheses, slashes inside labels).
+
+flashcards: exactly 8 cards. First 4 recall, last 4 application/synthesis.
+quiz: exactly 5 questions. Difficulty: 2 easy, 2 medium, 1 hard.
+
+Output: pure JSON only. No markdown. No code fences. No trailing commas.
 """
