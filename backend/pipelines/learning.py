@@ -34,22 +34,42 @@ FIXTURE_MODE = os.getenv("FIXTURE_MODE", "").lower() in ("1", "true", "yes")
 YOUTUBE_BASE = "https://www.googleapis.com/youtube/v3"
 
 
-async def run_pipeline() -> None:
-    """Fetch, dedupe, score, and store top-5 learning picks. Idempotent per 48h cycle."""
+async def run_pipeline(force: bool = False, user_id: Optional[str] = None) -> None:
+    """Fetch, dedupe, score, and store top-5 learning picks. Idempotent per 48h cycle.
+
+    Args:
+        force:   Skip the 48h idempotency check (used by manual refresh).
+        user_id: If provided, loads this user's dislike preferences and passes
+                 them to Claude so disliked sources/tags are excluded.
+    """
     today = date.today().isoformat()
 
-    # Check if we already ran within 48h
-    last_cycle = dashboard_db.get_latest_feed_cycle("learning")
-    if last_cycle and not FIXTURE_MODE:
-        from datetime import timedelta
-        last_dt = datetime.fromisoformat(last_cycle)
-        if (datetime.now().date() - last_dt.date()).days < 2:
-            logger.info("Learning pipeline: last cycle was %s, skipping", last_cycle)
-            return
+    # Check if we already ran within 48h (skip when force=True)
+    if not force:
+        last_cycle = dashboard_db.get_latest_feed_cycle("learning")
+        if last_cycle and not FIXTURE_MODE:
+            from datetime import timedelta
+            last_dt = datetime.fromisoformat(last_cycle)
+            if (datetime.now().date() - last_dt.date()).days < 2:
+                logger.info("Learning pipeline: last cycle was %s, skipping", last_cycle)
+                return
 
     if FIXTURE_MODE:
         _load_fixture(today)
         return
+
+    # Load user dislike preferences if a user_id is provided
+    dislikes: dict = {"sources": [], "tags": []}
+    if user_id:
+        try:
+            dislikes = dashboard_db.get_dislike_preferences(user_id)
+            if dislikes["sources"] or dislikes["tags"]:
+                logger.info(
+                    "Learning pipeline: user %s dislikes sources=%s tags=%s",
+                    user_id[:8], dislikes["sources"], dislikes["tags"],
+                )
+        except Exception as e:
+            logger.warning("Learning pipeline: could not load dislikes: %s", e)
 
     try:
         raw_items = _fetch_all_sources()
@@ -59,7 +79,7 @@ async def run_pipeline() -> None:
             logger.warning("Learning pipeline: no items fetched")
             return
 
-        curated = await _curate_with_claude(raw_items, today)
+        curated = await _curate_with_claude(raw_items, today, dislikes=dislikes)
         if not curated:
             logger.warning("Learning pipeline: curation failed — keeping previous cycle")
             return
@@ -217,7 +237,7 @@ def _fetch_learning_rss() -> list[dict]:
     return items
 
 
-async def _curate_with_claude(items: list[dict], today: str) -> Optional[list[dict]]:
+async def _curate_with_claude(items: list[dict], today: str, dislikes: Optional[dict] = None) -> Optional[list[dict]]:
     """Score and summarise learning content with Claude."""
     candidates = items[:30]
 
@@ -236,10 +256,21 @@ async def _curate_with_claude(items: list[dict], today: str) -> Optional[list[di
         indent=2,
     )
 
+    # Build dislike exclusion block if preferences are present
+    dislike_block = ""
+    if dislikes and (dislikes.get("sources") or dislikes.get("tags")):
+        lines = ["USER PREFERENCES — EXCLUDE these from the final top-5:"]
+        if dislikes.get("sources"):
+            lines.append(f"  - Disliked sources (do not include): {', '.join(dislikes['sources'])}")
+        if dislikes.get("tags"):
+            lines.append(f"  - Disliked topics/tags (avoid these): {', '.join(dislikes['tags'])}")
+        lines.append("If excluding these leaves fewer than 5 items, pick the next best alternatives.")
+        dislike_block = "\n".join(lines) + "\n\n"
+
     prompt = f"""You curate learning content for a GenAI engineer building LLM apps (RAG, agents, evals).
 Today is {today}.
 
-SCORING RULES:
+{dislike_block}SCORING RULES:
 - Score each item 1-10 for educational value.
 - High scores (8-10): deep technical content, code examples, evergreen concepts, framework deep-dives,
   paper walkthroughs, architecture explanations, hands-on tutorials (15-90 min videos preferred).

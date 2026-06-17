@@ -159,6 +159,20 @@ def ensure_dashboard_tables() -> None:
                 created_at   TEXT NOT NULL,
                 UNIQUE(user_id, feed_item_id)
             );
+
+            -- Per-user feed item reactions (like / dislike)
+            -- One row per user+feed_item; reaction replaces previous if changed.
+            CREATE TABLE IF NOT EXISTS feed_reactions (
+                id           TEXT PRIMARY KEY,
+                user_id      TEXT NOT NULL,
+                feed_item_id TEXT NOT NULL,
+                reaction     TEXT NOT NULL CHECK(reaction IN ('like', 'dislike')),
+                source_name  TEXT,
+                tag          TEXT,
+                kind         TEXT,
+                created_at   TEXT NOT NULL,
+                UNIQUE(user_id, feed_item_id)
+            );
         """)
         conn.commit()
         logger.info("Dashboard tables ensured")
@@ -587,6 +601,112 @@ def get_feed_item_by_id(feed_item_id: str) -> Optional[dict]:
             "SELECT * FROM feed_items WHERE id = ?", (feed_item_id,)
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ── feed reactions ─────────────────────────────────────────────
+
+def upsert_reaction(user_id: str, feed_item_id: str, reaction: str) -> dict:
+    """Save or update a like/dislike for a feed item. Returns the reaction dict."""
+    conn = get_conn()
+    try:
+        # Fetch feed item metadata for denormalised columns (source, tag, kind)
+        row = conn.execute(
+            "SELECT source_name, tag, kind FROM feed_items WHERE id = ?",
+            (feed_item_id,),
+        ).fetchone()
+        source_name = row["source_name"] if row else None
+        tag         = row["tag"]         if row else None
+        kind        = row["kind"]        if row else None
+
+        rid  = str(uuid.uuid4())
+        now  = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """INSERT INTO feed_reactions
+               (id, user_id, feed_item_id, reaction, source_name, tag, kind, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, feed_item_id)
+               DO UPDATE SET reaction=excluded.reaction, created_at=excluded.created_at""",
+            (rid, user_id, feed_item_id, reaction, source_name, tag, kind, now),
+        )
+        conn.commit()
+        return {
+            "id": rid, "userId": user_id, "feedItemId": feed_item_id,
+            "reaction": reaction, "sourceName": source_name, "tag": tag,
+        }
+    finally:
+        conn.close()
+
+
+def delete_reaction(user_id: str, feed_item_id: str) -> bool:
+    """Remove a reaction (user toggled off). Returns True if deleted."""
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "DELETE FROM feed_reactions WHERE user_id = ? AND feed_item_id = ?",
+            (user_id, feed_item_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_reaction(user_id: str, feed_item_id: str) -> Optional[str]:
+    """Return the user's current reaction for an item ('like'/'dislike'), or None."""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT reaction FROM feed_reactions WHERE user_id = ? AND feed_item_id = ?",
+            (user_id, feed_item_id),
+        ).fetchone()
+        return row["reaction"] if row else None
+    finally:
+        conn.close()
+
+
+def get_reaction_ids(user_id: str) -> dict:
+    """Return sets of liked and disliked feed_item_ids for a user."""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT feed_item_id, reaction FROM feed_reactions WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        liked    = {r["feed_item_id"] for r in rows if r["reaction"] == "like"}
+        disliked = {r["feed_item_id"] for r in rows if r["reaction"] == "dislike"}
+        return {"liked": liked, "disliked": disliked}
+    finally:
+        conn.close()
+
+
+def get_dislike_preferences(user_id: str) -> dict:
+    """Return aggregated disliked sources and tags to pass as context to Claude.
+
+    Returns:
+        {
+          "sources": ["Channel Name", ...],   # source_names with ≥1 dislike
+          "tags":    ["RAG", "agents", ...],  # tags with ≥2 dislikes (signal of real preference)
+        }
+    """
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            """SELECT source_name, tag
+               FROM feed_reactions
+               WHERE user_id = ? AND reaction = 'dislike'
+               AND source_name IS NOT NULL""",
+            (user_id,),
+        ).fetchall()
+        from collections import Counter
+        source_counts = Counter(r["source_name"] for r in rows if r["source_name"])
+        tag_counts    = Counter(r["tag"]         for r in rows if r["tag"])
+        # Only include sources/tags that appear at least once/twice
+        return {
+            "sources": [s for s, c in source_counts.items() if c >= 1],
+            "tags":    [t for t, c in tag_counts.items()    if c >= 2],
+        }
     finally:
         conn.close()
 

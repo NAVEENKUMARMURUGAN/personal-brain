@@ -127,9 +127,22 @@ extend type Mutation {
   reviewLearningCard(cardId: ID!, result: ReviewResult!): LearningCard!
   triageInboxItem(itemId: ID!, action: TriageAction!): Task!
   refreshBriefing: Briefing!
+  reactFeedItem(feedItemId: ID!, reaction: FeedReaction!): FeedReactionResult!
+  refreshLearningPicks: FeedSection!
   saveVaultItem(label: String!, secret: String!, category: String, notes: String): VaultItem!
   deleteVaultItem(itemId: ID!): Boolean!
   updateVaultItem(itemId: ID!, label: String, secret: String, category: String, notes: String): VaultItem!
+}
+
+enum FeedReaction {
+  like
+  dislike
+  none
+}
+
+type FeedReactionResult {
+  feedItemId: ID!
+  reaction: String
 }
 
 type VaultItem {
@@ -247,6 +260,7 @@ type FeedItem {
   durationMin: Int
   bookmarked: Boolean!
   videoId: String
+  reaction: String
 }
 
 type LocalSection {
@@ -397,6 +411,10 @@ async def handle(request: Request) -> JSONResponse:
             result = await _handle_triage_inbox_item(variables, user_id)
         elif op_type == "mutation" and field == "refreshBriefing":
             result = await _handle_refresh_briefing(user_id)
+        elif op_type == "mutation" and field == "reactFeedItem":
+            result = await _handle_react_feed_item(variables, user_id)
+        elif op_type == "mutation" and field == "refreshLearningPicks":
+            result = await _handle_refresh_learning_picks(user_id)
         # ── Vault mutations ────────────────────────────────────
         elif op_type == "mutation" and field == "saveVaultItem":
             result = await _handle_save_vault_item(variables, user_id)
@@ -707,6 +725,7 @@ async def _handle_dashboard(user_id: str) -> dict:
     # ── Learning Picks ────────────────────────────────────────
     try:
         bookmarked_ids = dashboard_db.get_bookmarked_item_ids(user_id)
+        reaction_map   = dashboard_db.get_reaction_ids(user_id)
         learn_items = dashboard_db.get_feed_items("learning", today)
         if not learn_items:
             last = dashboard_db.get_latest_feed_cycle("learning")
@@ -715,7 +734,7 @@ async def _handle_dashboard(user_id: str) -> dict:
         refreshed_at = learn_items[0].get("created_at") if learn_items else None
         dashboard["learningPicks"] = {
             "refreshedAt": refreshed_at,
-            "items": [_serialize_feed_item(item, bookmarked_ids) for item in learn_items],
+            "items": [_serialize_feed_item(item, bookmarked_ids, reaction_map) for item in learn_items],
         }
     except Exception as e:
         logger.error("Dashboard learningPicks error: %s", e)
@@ -925,11 +944,18 @@ def _extract_youtube_id(url: str) -> Optional[str]:
     return None
 
 
-def _serialize_feed_item(item: dict, bookmarked_ids: set) -> dict:
+def _serialize_feed_item(item: dict, bookmarked_ids: set, reaction_map: Optional[dict] = None) -> dict:
     """Convert a raw feed_items row to a GraphQL FeedItem shape."""
     source_url = item.get("source_url") or ""
+    item_id    = item.get("id", "")
+    reaction   = None
+    if reaction_map:
+        if item_id in reaction_map.get("liked", set()):
+            reaction = "like"
+        elif item_id in reaction_map.get("disliked", set()):
+            reaction = "dislike"
     return {
-        "id": item.get("id", ""),
+        "id": item_id,
         "rank": item.get("rank") or 0,
         "title": item.get("title", ""),
         "sourceName": item.get("source_name") or "",
@@ -939,8 +965,9 @@ def _serialize_feed_item(item: dict, bookmarked_ids: set) -> dict:
         "sourceUrl": source_url,
         "mediaType": item.get("media_type") or "article",
         "durationMin": item.get("duration_min"),
-        "bookmarked": item.get("id", "") in bookmarked_ids,
+        "bookmarked": item_id in bookmarked_ids,
         "videoId": _extract_youtube_id(source_url),
+        "reaction": reaction,
     }
 
 
@@ -1048,6 +1075,54 @@ async def _handle_refresh_briefing(user_id: str) -> dict:
         })
     except Exception as e:
         logger.error("refreshBriefing error: %s", e)
+        return _err(str(e))
+
+
+async def _handle_react_feed_item(variables: dict, user_id: str) -> dict:
+    """Record a like, dislike, or remove reaction (none) for a feed item."""
+    feed_item_id = variables.get("feedItemId", "").strip()
+    reaction     = variables.get("reaction", "").strip().lower()
+    if not feed_item_id:
+        return _err("feedItemId is required")
+    if reaction not in ("like", "dislike", "none"):
+        return _err("reaction must be like, dislike, or none")
+    try:
+        if reaction == "none":
+            dashboard_db.delete_reaction(user_id, feed_item_id)
+            result = {"feedItemId": feed_item_id, "reaction": None}
+        else:
+            result = dashboard_db.upsert_reaction(user_id, feed_item_id, reaction)
+            result = {"feedItemId": result["feedItemId"], "reaction": result["reaction"]}
+        return _ok({"reactFeedItem": result})
+    except Exception as e:
+        logger.error("reactFeedItem error: %s", e)
+        return _err(str(e))
+
+
+async def _handle_refresh_learning_picks(user_id: str) -> dict:
+    """Force-refresh the learning picks pipeline for this user, applying their preferences."""
+    try:
+        from pipelines.learning import run_pipeline
+        await run_pipeline(force=True, user_id=user_id)
+        # Return freshest items
+        from datetime import date as _date
+        today = _date.today().isoformat()
+        bookmarked_ids = dashboard_db.get_bookmarked_item_ids(user_id)
+        reaction_map   = dashboard_db.get_reaction_ids(user_id)
+        items = dashboard_db.get_feed_items("learning", today)
+        if not items:
+            last = dashboard_db.get_latest_feed_cycle("learning")
+            if last:
+                items = dashboard_db.get_feed_items("learning", last)
+        refreshed_at = items[0].get("created_at") if items else None
+        return _ok({
+            "refreshLearningPicks": {
+                "refreshedAt": refreshed_at,
+                "items": [_serialize_feed_item(i, bookmarked_ids, reaction_map) for i in items],
+            }
+        })
+    except Exception as e:
+        logger.error("refreshLearningPicks error: %s", e)
         return _err(str(e))
 
 

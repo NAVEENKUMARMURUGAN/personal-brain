@@ -87,6 +87,63 @@
   transform: rotate(180deg);
 }
 
+/* Header action slot (e.g. refresh button) */
+.section-card__header-action {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.section-card__refresh-btn {
+  background: none;
+  border: 1px solid var(--border-base);
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-family: var(--mono-font);
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, transform 0.3s;
+  line-height: 1;
+}
+
+.section-card__refresh-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+
+.section-card__refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Like / dislike reaction buttons */
+.feed-row__react-btn {
+  background: none;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 3px;
+  border-radius: 4px;
+  opacity: 0.35;
+  transition: opacity 0.12s, transform 0.1s;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.feed-row__react-btn:hover {
+  opacity: 0.8;
+  transform: scale(1.15);
+}
+
+.feed-row__react-btn--liked {
+  opacity: 1;
+}
+
+.feed-row__react-btn--disliked {
+  opacity: 1;
+}
+
 .section-card__body {
   border-top: 1px solid var(--border-muted);
 }

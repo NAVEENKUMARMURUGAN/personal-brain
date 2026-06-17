@@ -275,6 +275,7 @@ export const GET_DASHBOARD = gql`
           durationMin
           bookmarked
           videoId
+          reaction
         }
       }
       localToday {
@@ -358,6 +359,38 @@ export const REFRESH_BRIEFING = gql`
       text
       generatedAt
       cycleDate
+    }
+  }
+`
+
+export const REACT_FEED_ITEM = gql`
+  mutation ReactFeedItem($feedItemId: ID!, $reaction: FeedReaction!) {
+    reactFeedItem(feedItemId: $feedItemId, reaction: $reaction) {
+      feedItemId
+      reaction
+    }
+  }
+`
+
+export const REFRESH_LEARNING_PICKS = gql`
+  mutation RefreshLearningPicks {
+    refreshLearningPicks {
+      refreshedAt
+      items {
+        id
+        rank
+        title
+        sourceName
+        tag
+        summaryShort
+        summaryDetail
+        sourceUrl
+        mediaType
+        durationMin
+        bookmarked
+        videoId
+        reaction
+      }
     }
   }
 `

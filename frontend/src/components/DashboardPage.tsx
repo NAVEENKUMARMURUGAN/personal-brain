@@ -6,6 +6,8 @@ import {
   SAVE_TO_BRAIN,
   TRIAGE_INBOX_ITEM,
   REFRESH_BRIEFING,
+  REACT_FEED_ITEM,
+  REFRESH_LEARNING_PICKS,
 } from '../graphql/queries'
 import { useAuth } from '../AuthContext'
 import ConceptCard from './cards/ConceptCard'
@@ -24,6 +26,7 @@ interface FeedItem {
   summaryShort: string; summaryDetail: string; sourceUrl: string
   mediaType: string; durationMin?: number | null; bookmarked: boolean
   videoId?: string | null
+  reaction?: string | null   // 'like' | 'dislike' | null
 }
 interface Repo { fullName: string; description: string; language?: string | null; starsGained7d: number; whyItMatters: string }
 interface LearningCardData { id: string; term: string; explanation: string; usageLine?: string | null; codeExample?: string | null; pathwayNode: string; ease: number; timesSeen: number; mastered: boolean }
@@ -148,10 +151,11 @@ interface SectionCardProps {
   title: string
   meta?: string
   defaultOpen?: boolean
+  headerAction?: React.ReactNode
   children: React.ReactNode
 }
 
-function SectionCard({ id, icon, title, meta, defaultOpen = true, children }: SectionCardProps) {
+function SectionCard({ id, icon, title, meta, defaultOpen = true, headerAction, children }: SectionCardProps) {
   const storageKey = `pb-dash-open-${id}`
   const [open, setOpen] = useState<boolean>(() => {
     try {
@@ -174,6 +178,11 @@ function SectionCard({ id, icon, title, meta, defaultOpen = true, children }: Se
         <span className="section-card__icon">{icon}</span>
         <span className="section-card__title">{title}</span>
         {meta && <span className="section-card__meta">{meta}</span>}
+        {headerAction && (
+          <span onClick={e => e.stopPropagation()} className="section-card__header-action">
+            {headerAction}
+          </span>
+        )}
         <span className={`section-card__chevron${open ? ' section-card__chevron--open' : ''}`}>▼</span>
       </div>
       {open && <div className="section-card__body">{children}</div>}
@@ -204,14 +213,16 @@ interface FeedRowProps {
   openId: string | null
   onToggle: (id: string) => void
   onDiscuss: (title: string) => void
+  onReact?: (id: string, reaction: 'like' | 'dislike' | 'none') => void
   rank: number
 }
 
-function FeedRow({ item, openId, onToggle, onDiscuss, rank }: FeedRowProps) {
+function FeedRow({ item, openId, onToggle, onDiscuss, onReact, rank }: FeedRowProps) {
   const isOpen = openId === item.id
   const [bookmarked, setBookmarked] = useState(item.bookmarked)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState(false)
+  const [reaction, setReaction] = useState<string | null>(item.reaction ?? null)
 
   const [saveToBrain] = useMutation(SAVE_TO_BRAIN)
 
@@ -265,6 +276,30 @@ function FeedRow({ item, openId, onToggle, onDiscuss, rank }: FeedRowProps) {
         </div>
         <div className="feed-row__meta">
           <span className={tagClass}>{item.tag}</span>
+          {onReact && (
+            <>
+              <button
+                className={`feed-row__react-btn${reaction === 'like' ? ' feed-row__react-btn--liked' : ''}`}
+                onClick={e => {
+                  e.stopPropagation()
+                  const next = reaction === 'like' ? 'none' : 'like'
+                  setReaction(next === 'none' ? null : next)
+                  onReact(item.id, next as 'like' | 'dislike' | 'none')
+                }}
+                title={reaction === 'like' ? 'Unlike' : 'Like this'}
+              >👍</button>
+              <button
+                className={`feed-row__react-btn${reaction === 'dislike' ? ' feed-row__react-btn--disliked' : ''}`}
+                onClick={e => {
+                  e.stopPropagation()
+                  const next = reaction === 'dislike' ? 'none' : 'dislike'
+                  setReaction(next === 'none' ? null : next)
+                  onReact(item.id, next as 'like' | 'dislike' | 'none')
+                }}
+                title={reaction === 'dislike' ? 'Remove dislike' : 'Not interested'}
+              >👎</button>
+            </>
+          )}
           <button
             className={`feed-row__bookmark${bookmarked ? ' feed-row__bookmark--saved' : ''}`}
             onClick={handleSave}
@@ -341,8 +376,14 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
   const dashboard: DashboardData | undefined = data?.dashboard
 
   const [refreshBriefing, { loading: refreshingBriefing }] = useMutation(REFRESH_BRIEFING)
+  const [reactFeedItem]   = useMutation(REACT_FEED_ITEM)
+  const [refreshLearning, { loading: refreshingLearning }] = useMutation(REFRESH_LEARNING_PICKS)
   const [completeTask] = useMutation(COMPLETE_TASK)
   const [triageInbox] = useMutation(TRIAGE_INBOX_ITEM)
+
+  // Local learning picks state (overrides query data after manual refresh)
+  const [localLearningItems, setLocalLearningItems] = useState<FeedItem[] | null>(null)
+  const [localLearningRefreshedAt, setLocalLearningRefreshedAt] = useState<string | null>(null)
 
   // Local task states for inline completion feedback
   const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set())
@@ -403,6 +444,23 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
       setRemovedInboxIds(prev => { const n = new Set(prev); n.delete(itemId); return n })
     }
   }, [triageInbox])
+
+  const handleRefreshLearning = useCallback(async () => {
+    try {
+      const result = await refreshLearning()
+      const section = result.data?.refreshLearningPicks
+      if (section) {
+        setLocalLearningItems(section.items)
+        setLocalLearningRefreshedAt(section.refreshedAt)
+      }
+    } catch { /* silent */ }
+  }, [refreshLearning])
+
+  const handleReact = useCallback(async (feedItemId: string, reaction: 'like' | 'dislike' | 'none') => {
+    try {
+      await reactFeedItem({ variables: { feedItemId, reaction } })
+    } catch { /* silent — UI already updated optimistically */ }
+  }, [reactFeedItem])
 
   const toggleNews = useCallback((id: string) => {
     setOpenNewsId(prev => prev === id ? null : id)
@@ -676,29 +734,46 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
         </SectionCard>
 
         {/* ── 5. Learning Picks ── */}
-        <SectionCard
-          id="learning"
-          icon="◈"
-          title="Learning Picks"
-          meta="Personalized for you"
-        >
-          {loading && !dashboard ? (
-            <SkeletonRows count={5} />
-          ) : (dashboard?.learningPicks?.items || []).length > 0 ? (
-            (dashboard?.learningPicks?.items || []).map((item, i) => (
-              <FeedRow
-                key={item.id}
-                item={item}
-                rank={i + 1}
-                openId={openLearnId}
-                onToggle={toggleLearn}
-                onDiscuss={title => navigateToChat(`Tell me more about: ${title}`)}
-              />
-            ))
-          ) : (
-            <div className="today-empty">Learning pipeline hasn't run yet. Check back in 48h.</div>
-          )}
-        </SectionCard>
+        {(() => {
+          const learnItems = localLearningItems ?? dashboard?.learningPicks?.items ?? []
+          const learnRefreshedAt = localLearningRefreshedAt ?? dashboard?.learningPicks?.refreshedAt
+          return (
+            <SectionCard
+              id="learning"
+              icon="◈"
+              title="Learning Picks"
+              meta={learnRefreshedAt ? `Updated ${timeAgo(learnRefreshedAt)}` : 'Personalized for you'}
+              headerAction={
+                <button
+                  className="section-card__refresh-btn"
+                  onClick={handleRefreshLearning}
+                  disabled={refreshingLearning}
+                  title="Refresh learning picks"
+                >
+                  {refreshingLearning ? '…' : '↺'}
+                </button>
+              }
+            >
+              {loading && !dashboard ? (
+                <SkeletonRows count={5} />
+              ) : learnItems.length > 0 ? (
+                learnItems.map((item, i) => (
+                  <FeedRow
+                    key={item.id}
+                    item={item}
+                    rank={i + 1}
+                    openId={openLearnId}
+                    onToggle={toggleLearn}
+                    onDiscuss={title => navigateToChat(`Tell me more about: ${title}`)}
+                    onReact={handleReact}
+                  />
+                ))
+              ) : (
+                <div className="today-empty">Learning pipeline hasn't run yet. Check back in 48h.</div>
+              )}
+            </SectionCard>
+          )
+        })()}
 
         {/* ── 6. Local Today ── */}
         <SectionCard id="local" icon="⊙" title="Local Today" defaultOpen>
