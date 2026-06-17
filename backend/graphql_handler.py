@@ -3,7 +3,7 @@ import uuid
 import logging
 import traceback
 from datetime import datetime, timezone, date
-from typing import Any
+from typing import Any, Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
