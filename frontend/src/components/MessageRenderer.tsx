@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import TaskCard from './cards/TaskCard'
 import CategoryCard from './cards/CategoryCard'
@@ -110,6 +110,75 @@ const Avatar = () => (
   <div className="msg__avatar" title="Personal Brain">⚡</div>
 )
 
+// ── Vault search result card ───────────────────────────────────
+interface VaultItem {
+  id: string
+  label: string
+  category: string
+  secret: string
+  notes?: string | null
+}
+
+function VaultCard({ items }: { items: VaultItem[] }) {
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  const [copied,   setCopied]   = useState<Record<string, boolean>>({})
+
+  const toggle = (id: string) =>
+    setRevealed(prev => ({ ...prev, [id]: !prev[id] }))
+
+  const copy = async (id: string, secret: string) => {
+    try {
+      await navigator.clipboard.writeText(secret)
+      setCopied(prev => ({ ...prev, [id]: true }))
+      setTimeout(() => setCopied(prev => ({ ...prev, [id]: false })), 2000)
+    } catch { /* clipboard not available */ }
+  }
+
+  return (
+    <div className="vault-card">
+      {items.map(item => {
+        const show = !!revealed[item.id]
+        const didCopy = !!copied[item.id]
+        return (
+          <div key={item.id} className="vault-card__item">
+            <div className="vault-card__header">
+              <span className="vault-card__icon">🔐</span>
+              <div className="vault-card__meta">
+                <span className="vault-card__label">{item.label}</span>
+                <span className="vault-card__category">{item.category}</span>
+              </div>
+            </div>
+
+            <div className="vault-card__secret-row">
+              <span className="vault-card__secret">
+                {show ? item.secret : '•'.repeat(Math.min(item.secret.length, 20))}
+              </span>
+              <button
+                className="vault-card__btn"
+                onClick={() => toggle(item.id)}
+                title={show ? 'Hide' : 'Reveal'}
+              >
+                {show ? '👁 Hide' : '👁 Reveal'}
+              </button>
+              <button
+                className={`vault-card__btn${didCopy ? ' vault-card__btn--copied' : ''}`}
+                onClick={() => copy(item.id, item.secret)}
+                title="Copy to clipboard"
+              >
+                {didCopy ? '✓ Copied' : '⎘ Copy'}
+              </button>
+            </div>
+
+            {item.notes && (
+              <div className="vault-card__notes">{item.notes}</div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export default function MessageRenderer({ message, onDrill, onCompleteTask }: MessageRendererProps) {
   const isUser = message.role === 'user'
 
@@ -179,6 +248,19 @@ export default function MessageRenderer({ message, onDrill, onCompleteTask }: Me
         <div className="msg__body">
           {message.content && <div className="msg__text">{message.content}</div>}
           <MemoryCard payload={payload as Parameters<typeof MemoryCard>[0]['payload']} />
+        </div>
+      </div>
+    )
+  }
+
+  if (message.type === 'vault_search' && payload) {
+    const items = (payload as { items?: VaultItem[] }).items ?? []
+    return (
+      <div className="msg msg--assistant">
+        <Avatar />
+        <div className="msg__body">
+          {message.content && <div className="msg__text">{message.content}</div>}
+          {items.length > 0 && <VaultCard items={items} />}
         </div>
       </div>
     )

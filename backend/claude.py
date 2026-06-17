@@ -702,6 +702,7 @@ def _build_response(answer: str, tool_calls: list[dict]) -> dict:
     search_meta = None
     save_meta = None
     cat_meta = None
+    vault_meta = None
 
     for call in tool_calls:
         meta = call.get("meta", {})
@@ -715,6 +716,8 @@ def _build_response(answer: str, tool_calls: list[dict]) -> dict:
             save_meta = meta
         elif t == "categories":
             cat_meta = meta
+        elif t == "vault_search":
+            vault_meta = meta
 
     # Compound: task + search used together → this is a QUESTION, not a list request.
     # Return plain text answer with sources only — no TaskCard.
@@ -765,6 +768,15 @@ def _build_response(answer: str, tool_calls: list[dict]) -> dict:
             "type": "category_list",
             "action": "show_categories",
             "payload": {"categories": cat_meta.get("categories", [])},
+            "sources": [],
+        }
+
+    if vault_meta:
+        return {
+            "answer": answer,
+            "type": "vault_search",
+            "action": "vault_search",
+            "payload": {"items": vault_meta.get("items", [])},
             "sources": [],
         }
 
