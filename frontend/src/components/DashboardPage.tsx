@@ -206,6 +206,16 @@ function SkeletonRows({ count = 5 }: { count?: number }) {
   )
 }
 
+// ── Pipeline Loading state (pipelines still running in background) ─────────
+function PipelineLoading({ label }: { label: string }) {
+  return (
+    <div className="pipeline-loading">
+      <span className="pipeline-loading__spinner" />
+      <span className="pipeline-loading__label">{label}</span>
+    </div>
+  )
+}
+
 // ── Feed Row (news + learning) ─────────────────────────────────
 
 interface FeedRowProps {
@@ -368,12 +378,28 @@ const LANG_COLORS: Record<string, string> = {
 export default function DashboardPage({ setPage }: DashboardPageProps) {
   const { user } = useAuth()
 
-  const { data, loading } = useQuery(GET_DASHBOARD, {
+  // Poll every 6 s while any pipeline section is still empty (pipelines run in
+  // the background after login and may take 10-30 s to finish).
+  // Once all sections have data, polling stops automatically.
+  const [pollInterval, setPollInterval] = useState(6000)
+
+  const { data, loading, refetch } = useQuery(GET_DASHBOARD, {
     fetchPolicy: 'cache-and-network',
     notifyOnNetworkStatusChange: true,
+    pollInterval,
   })
 
   const dashboard: DashboardData | undefined = data?.dashboard
+
+  // Stop polling once all pipeline-backed sections are populated
+  useEffect(() => {
+    if (!dashboard) return
+    const stillLoading =
+      !dashboard.news?.items?.length ||
+      !dashboard.learningPicks?.items?.length ||
+      !dashboard.trendingRepos?.length
+    setPollInterval(stillLoading ? 6000 : 0)
+  }, [dashboard])
 
   const [refreshBriefing, { loading: refreshingBriefing }] = useMutation(REFRESH_BRIEFING)
   const [reactFeedItem]   = useMutation(REACT_FEED_ITEM)
@@ -707,8 +733,8 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
           title="Top AI News"
           meta={dashboard?.news?.refreshedAt ? `Refreshed ${timeAgo(dashboard.news.refreshedAt)}` : undefined}
         >
-          {loading && !dashboard ? (
-            <SkeletonRows count={5} />
+          {(loading && !dashboard) || (!loading && !(dashboard?.news?.items || []).length) ? (
+            <PipelineLoading label="Fetching today's AI news…" />
           ) : (dashboard?.news?.items || []).length > 0 ? (
             <>
               {(dashboard?.news?.items || []).map((item, i) => (
@@ -728,9 +754,7 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
                 Discuss today's news in chat →
               </div>
             </>
-          ) : (
-            <div className="today-empty">News pipeline hasn't run yet. Check back soon.</div>
-          )}
+          ) : null}
         </SectionCard>
 
         {/* ── 5. Learning Picks ── */}
@@ -754,8 +778,8 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
                 </button>
               }
             >
-              {loading && !dashboard ? (
-                <SkeletonRows count={5} />
+              {(loading && !dashboard) || (!loading && !learnItems.length) ? (
+                <PipelineLoading label="Curating your learning picks…" />
               ) : learnItems.length > 0 ? (
                 learnItems.map((item, i) => (
                   <FeedRow
@@ -768,9 +792,7 @@ export default function DashboardPage({ setPage }: DashboardPageProps) {
                     onReact={handleReact}
                   />
                 ))
-              ) : (
-                <div className="today-empty">Learning pipeline hasn't run yet. Check back in 48h.</div>
-              )}
+              ) : null}
             </SectionCard>
           )
         })()}

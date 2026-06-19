@@ -569,6 +569,31 @@
   text-align: center;
 }
 
+/* Pipeline background-loading indicator */
+.pipeline-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 18px;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--mono-font);
+}
+
+.pipeline-loading__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: pipeline-spin 0.9s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pipeline-spin {
+  to { transform: rotate(360deg); }
+}
+
 .today-subsection {
   padding: 8px 18px 4px;
   font-size: 10px;
